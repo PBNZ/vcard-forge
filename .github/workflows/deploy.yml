@@ -75,6 +75,47 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Pages
         uses: actions/configure-pages@v4
+      - name: Inject Google Analytics
+        env:
+          GA_ID: ${{ vars.GA_MEASUREMENT_ID }}
+        run: |
+          python3 - << 'EOF'
+          import os, re, sys
+
+          ga_id = os.environ.get('GA_ID', '').strip()
+          placeholder = '<!-- GOOGLE_ANALYTICS_PLACEHOLDER -->'
+
+          with open('src/index.html', 'r', encoding='utf-8') as f:
+              html = f.read()
+
+          if re.match(r'^G-[A-Z0-9]+$', ga_id):
+              count = html.count(placeholder)
+              if count != 1:
+                  print(f'ERROR: Expected exactly 1 placeholder, found {count}. Cannot inject Google Analytics.')
+                  sys.exit(1)
+              snippet = (
+                  '<!-- Google tag (gtag.js) -->\n'
+                  '    <script async src="https://www.googletagmanager.com/gtag/js?id=' + ga_id + '"></script>\n'
+                  '    <script>\n'
+                  '      window.dataLayer = window.dataLayer || [];\n'
+                  '      function gtag(){dataLayer.push(arguments);}\n'
+                  '      gtag("js", new Date());\n'
+                  '      gtag("config", "' + ga_id + '");\n'
+                  '    </script>'
+              )
+              html = html.replace(placeholder, snippet)
+              print('Google Analytics injected:', ga_id)
+          else:
+              html = re.sub(r'^[ \t]*' + re.escape(placeholder) + r'[ \t]*\r?\n?', '', html, flags=re.MULTILINE)
+              if ga_id:
+                  print('WARNING: GA_MEASUREMENT_ID "' + ga_id + '" is not a valid GA4 ID (expected format: G- followed by uppercase letters/digits, e.g. G-HHYVHP2GN1). Skipping.')
+              else:
+                  print('GA_MEASUREMENT_ID not set — skipping analytics injection.')
+
+          with open('src/index.html', 'w', encoding='utf-8') as f:
+              f.write(html)
+          EOF
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
