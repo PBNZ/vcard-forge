@@ -72,6 +72,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in else branch, creating implicit global
 
 ### Removed
+- All non-contact NFC generators (URL, Wi-Fi/WPS, Android Application Record,
+  custom MIME) — the NFC layer now builds vCard tags only (single `text/vcard`
+  record or dual vCard + hosted-URL record)
+- Unused Flipper loader / Bad USB / directory-listing WebSerial methods
 - Google Analytics tracking code
 - Google Fonts external stylesheet import
 - `app.js` (unused Vue.js prototype, never loaded)

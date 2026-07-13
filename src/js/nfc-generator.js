@@ -1,8 +1,9 @@
 /**
  * @file nfc-generator.js
  * @description NFC/NDEF byte-level generation for Flipper Zero .nfc files.
- *              Supports NTAG213, NTAG215, and NTAG216 tags with single-record
- *              and multi-record NDEF message construction.
+ *              Builds vCard contact tags for NTAG213/215/216: a single
+ *              text/vcard MIME record, or a dual-record message (vCard +
+ *              hosted .vcf URL) for iOS + Android compatibility.
  *
  * Original work Copyright (c) jaylikesbunda
  * Modifications Copyright (c) PBNZ 2026
@@ -395,26 +396,6 @@ class NfcNtag {
      * ---------------------------------------------------------------- */
 
     /**
-     * Generate a URI/URL NFC tag.
-     * @param {string} uri - The full URI to encode.
-     */
-    generateUrlTag(uri) {
-        this.uid = this._generateUid();
-        this._writeHeaderPages();
-
-        const { payload } = buildUriPayload(uri);
-        const record = buildNdefRecord({
-            tnf: 0x01,  // Well-Known
-            type: [0x55], // 'U'
-            payload,
-            mb: true,
-            me: true
-        });
-        this._writeNdefData(wrapInTlv(record));
-        this._writeEndPages();
-    }
-
-    /**
      * Generate a vCard NFC tag (single MIME record).
      * @param {string} vcardData - The full vCard text (BEGIN:VCARD ... END:VCARD).
      */
@@ -469,102 +450,6 @@ class NfcNtag {
 
         const fullMessage = [...vcardRecord, ...urlRecord];
         this._writeNdefData(wrapInTlv(fullMessage));
-        this._writeEndPages();
-    }
-
-    /**
-     * Generate a Wi-Fi configuration NFC tag.
-     * @param {string} data - Formatted as "SSID:name;PASSWORD:pass;AUTH:WPA|WEP|NONE".
-     */
-    generateWifiTag(data) {
-        this.uid = this._generateUid();
-        this._writeHeaderPages();
-
-        const helper = new NfcHelper();
-        const params = data.split(';').reduce((acc, param) => {
-            const [key, value] = param.split(':');
-            acc[key] = value;
-            return acc;
-        }, {});
-
-        if (!params.SSID || !params.PASSWORD || !params.AUTH) {
-            throw new Error('Invalid Wi-Fi configuration data.');
-        }
-
-        const ssidBytes = helper.stringToBytes(params.SSID);
-        const passwordBytes = helper.stringToBytes(params.PASSWORD);
-        let authType;
-        if (params.AUTH.toUpperCase() === 'WPA') {
-            authType = [0x00, 0x02];
-        } else if (params.AUTH.toUpperCase() === 'WEP') {
-            authType = [0x00, 0x01];
-        } else {
-            authType = [0x00, 0x00];
-        }
-
-        const credential = [
-            0x10, 0x0E, 0x00, // Credential Type + placeholder length
-            0x10, 0x45, ssidBytes.length, ...ssidBytes,
-            0x10, 0x03, 0x02, ...authType,
-            0x10, 0x27, passwordBytes.length, ...passwordBytes
-        ];
-        credential[2] = credential.length - 3; // Update credential length
-
-        const payload = [
-            0x10, 0x0E, 0x01, 0x10,
-            0x10, 0x02, 0x01, 0x01,
-            ...credential
-        ];
-
-        const record = buildNdefRecord({
-            tnf: 0x01,
-            type: [0x53, 0x70, 0x70], // 'Spp' (WPS)
-            payload,
-            mb: true,
-            me: true
-        });
-        this._writeNdefData(wrapInTlv(record));
-        this._writeEndPages();
-    }
-
-    /**
-     * Generate an Android Application Record (AAR) NFC tag.
-     * @param {string} packageName - Android package name (e.g. "com.example.app").
-     */
-    generateAarTag(packageName) {
-        this.uid = this._generateUid();
-        this._writeHeaderPages();
-
-        const helper = new NfcHelper();
-        const record = buildNdefRecord({
-            tnf: 0x04,  // External type
-            type: helper.stringToBytes('android.com:pkg'),
-            payload: helper.stringToBytes(packageName),
-            mb: true,
-            me: true
-        });
-        this._writeNdefData(wrapInTlv(record));
-        this._writeEndPages();
-    }
-
-    /**
-     * Generate a custom MIME type NFC tag.
-     * @param {string} mimeType - The MIME type string (e.g. "application/json").
-     * @param {string} content - The payload data.
-     */
-    generateCustomMimeTag(mimeType, content) {
-        this.uid = this._generateUid();
-        this._writeHeaderPages();
-
-        const helper = new NfcHelper();
-        const record = buildNdefRecord({
-            tnf: 0x02,
-            type: helper.stringToBytes(mimeType),
-            payload: helper.stringToBytes(content),
-            mb: true,
-            me: true
-        });
-        this._writeNdefData(wrapInTlv(record));
         this._writeEndPages();
     }
 
@@ -664,8 +549,3 @@ Pages total: ${this.config.pages}
 Pages read: ${this.config.pages}`;
     }
 }
-
-// TODO: Future — Manual multi-record tag creation (user picks arbitrary record types)
-// TODO: Future — Enhanced vCard creation/editing UI (full wizard with type qualifiers per field)
-// TODO: Future — Direct VCF content creation without requiring a pre-hosted file
-// TODO: Future — VCF hosting service integration
