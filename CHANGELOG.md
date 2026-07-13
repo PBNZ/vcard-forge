@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Design spec for the VCF Pro transformation
+  (`docs/superpowers/specs/2026-07-13-vcf-pro-transformation-design.md`)
+- vCard compliance reference distilled from the primary specifications — versit 2.1,
+  RFC 2426/2425, RFC 6350, RFC 6868 (`docs/reference/vcard-compliance.md`)
 - **iOS Compatible Business Card (VCF/vCard)** feature: dual-record NDEF tags
   with `text/vcard` MIME record (Android) + URL record (iOS Safari)
 - Fully interactive **Dynamic vCard Builder Wizard** (supports import via paste or URL)
