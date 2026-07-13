@@ -9,6 +9,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **RFC-compliant vCard core library** replacing the previous ad-hoc parser:
+  `vcard-standard.js` (property/parameter registry with per-version rules),
+  `vcard-parser.js` (lenient reader: QUOTED-PRINTABLE + CHARSET, RFC 6868 caret
+  encoding, bare 2.1 parameters, groups, nested AGENT), `vcard-serializer.js`
+  (strict 2.1/3.0/4.0 writer: correct folding, escaping, QP, version conversion
+  with PREF↔TYPE=pref and inline-binary↔data:-URI bridging, FN/N derivation),
+  and `vcard-validator.js` (per-version diagnostics)
+- Zero-dependency test runner (`tests/run-tests.js`) and a 61-test compliance
+  suite (`tests/vcard-core.test.js`) covering all three vCard versions
 - Design spec for the VCF Pro transformation
   (`docs/superpowers/specs/2026-07-13-vcf-pro-transformation-design.md`)
 - vCard compliance reference distilled from the primary specifications — versit 2.1,
@@ -20,7 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Read-only "passthrough" rendering for complex/unsupported vCard properties
 - Automated vCard validation with inline visual error reporting
 - Comprehensive vCard property support (`URL`, `BDAY`, `ANNIVERSARY`, `NICKNAME`, `ORG`, etc.)
-- Node.js test suite (`logic_tests.js`) and mass multi-format vCard test generator
+
 - Live capacity bar showing NDEF byte usage per tag type
 - Tag type selector with automatic disable for undersized tags
 - Dark/light mode with `prefers-color-scheme` auto-detection + manual toggle
