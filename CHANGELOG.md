@@ -48,8 +48,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Visual refresh**: navy + teal colour scheme, system font stack, no
   external fonts or analytics — fully `file://`-compatible
 - `README.md` and `CONTRIBUTING.md` rewritten for the vCard-first scope
-- CI: `actions/checkout` and `actions/setup-node` bumped to v5, Node 20 → 24
-  (clears the runner deprecation notice)
+- CI: `actions/checkout`/`setup-node` bumped to v5, `configure-pages` to v6,
+  `upload-pages-artifact`/`deploy-pages` to v5, Node 20 → 24 (clears the
+  runner deprecation notices)
 
 ### Fixed
 - **BCC0 calculation**: added missing `0x88` XOR per NFC Forum specification
