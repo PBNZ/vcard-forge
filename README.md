@@ -1,132 +1,105 @@
-# Flipper NFC Maker Plus
+# VCF Pro — vCard Studio for Flipper
 
-> A fork of [jaylikesbunda/Flipper-NFC-Maker](https://github.com/jaylikesbunda/Flipper-NFC-Maker) — a client-side web app for generating Flipper Zero `.nfc` tag files.
-
-**This fork adds:** iOS-compatible business card NFC tags, a visual refresh, bug fixes, multi-NTAG type support with correct specifications, and a modernised codebase.
+> A professional, fully client-side **vCard (.vcf) editor and creator** with RFC-compliant
+> output for vCard **2.1, 3.0, and 4.0** — plus Flipper Zero **`.nfc` contact tag** export
+> and direct WebSerial transfer.
+>
+> A fork of [jaylikesbunda/Flipper-NFC-Maker](https://github.com/jaylikesbunda/Flipper-NFC-Maker),
+> transformed from a general NFC tag generator into a vCard-first tool
+> ([ADR 0001](docs/adr/0001-vcf-pro-transformation.md)).
 
 🌐 **Try it live:** [https://pbnz.github.io/Flipper-NFC-Maker-Plus/](https://pbnz.github.io/Flipper-NFC-Maker-Plus/)
 
-**License:** [GNU General Public License v3](LICENSE) — see [Licensing](#licensing) below.
+**License:** [GNU General Public License v3](LICENSE)
 
 ---
 
-## ✨ What's New in This Fork
+## ✨ What it does
 
-| Feature | Description |
-|---------|-------------|
-| **Advanced vCard Editor** | Full creation wizard for vCard 4.0 with real-time property editing |
-| **Intelligent Capacity Tracking** | Live visualization of remaining bytes with auto-switch suggestions for Tag Types |
-| **Bug fixes** | Fixed BCC0 calculation, CC bytes, Mifare version per NTAG type, long-form NDEF records |
-| **NTAG213/215/216 support** | Correct specifications for all three tag types with live capacity checking |
-| **Visual refresh** | Modern Segmented Controls, navy + teal colour scheme, dark/light mode with system preference detection |
-| **No external dependencies** | System fonts, no Google Fonts, no analytics — works fully offline |
-| **Restructured codebase** | Modular JS files, JSDoc annotations, AI-development-friendly |
+| Capability | Details |
+|------------|---------|
+| **vCard editor** | Grouped property editor (identity, organization, phones, email/IM/web, addresses, dates & personal, notes & metadata) with multi-value rows, TYPE chips, and preferred-★ handling |
+| **Three standards, one model** | Switch the target between 2.1 / 3.0 / 4.0 at any time — fields that don't exist in the target are hidden, conversions (PREF ↔ TYPE=pref, inline binary ↔ `data:` URI, FN/N derivation) happen automatically, and anything that would be dropped is reported before export |
+| **RFC-compliant output** | Correct folding (75-octet, UTF-8-safe), escaping, QUOTED-PRINTABLE + CHARSET for 2.1, RFC 6868 caret encoding for 4.0 parameters — every rule cited to the spec in [docs/reference/vcard-compliance.md](docs/reference/vcard-compliance.md) |
+| **Live validation** | Per-version diagnostics as you type: mandatory properties, 4.0 cardinality (ALTID-aware), TYPE vocabularies, PREF range, GENDER shape, date formats |
+| **Lenient import** | Paste, open a file, or fetch a URL — reads sloppy line endings, bare 2.1 parameters, QP/charsets, groups, nested AGENT cards; unknown properties round-trip untouched |
+| **Flipper `.nfc` export** | NTAG213/215/216 with live capacity bar; single `text/vcard` record (Android) or dual-record vCard + hosted-URL (iOS + Android) |
+| **Send to Flipper** | Direct WebSerial transfer to `/ext/nfc/` (Chrome/Edge desktop) |
+| **Zero infrastructure** | No build step, no server, no dependencies, no analytics — works from `file://` |
 
-## 🚀 Quick Start
+## 🚀 Quick start
 
-1. **Clone** the repo (or download the ZIP):
+1. **Clone** (or download the ZIP):
    ```bash
    git clone https://github.com/PBNZ/Flipper-NFC-Maker-Plus.git
    ```
 2. **Open** `src/index.html` in any modern browser
-3. **Done** — no build step, no server, no dependencies
+3. Build your contact, watch the live source and validation, and export `.vcf` or `.nfc`
 
-## 📋 Features
-
-### Standard NFC Tag Types
-- **URL** — with efficient URI prefix compression
-- **Phone, Email, SMS** — tel:, mailto:, sms: URI schemes
-- **Wi-Fi Configuration** — SSID, password, auth type
-- **Contact (vCard)** — paste raw vCard data
-- **Geo Location** — latitude/longitude coordinates
-- **Launch Application** — Android Application Records
-- **Custom MIME** — arbitrary MIME type + payload
-- **Social Media Links** — optimised URL records
-- **FaceTime / FaceTime Audio** — iOS-specific
-- **Apple Maps, HomeKit** — iOS-specific
-- **Send to Flipper** — WebSerial direct transfer (Chrome desktop)
-
-### Contact (vCard) [iOS+Android, Android] ✨
-1. Create vCards from scratch using the dynamic UI Editor or Import via URL/Paste.
-2. App natively parses and optimizes vCards to save NFC space.
-3. Automatically warns if payload exceeds NTAG type capacity, suggesting an upgrade.
-4. Generates a standard `text/vcard` payload OR a dual-record `.nfc` file (vCard + hosted VCF URL) for optimal iOS + Android compatibility.
-
-## 🌐 Deployment Options
-
-This app works in **all** of these scenarios without modification:
-
-| Method | Instructions |
-|--------|-------------|
-| **Local file** | Open `src/index.html` directly (file:// protocol) |
-| **Web server** | Copy `src/` contents to your web root |
-| **GitHub Pages** | Enable Pages on the `main` branch, set source to `src/` |
-| **S3 / CloudFront** | Upload `src/` contents to your bucket |
-| **IIS** | Copy `src/` contents to `wwwroot` |
-
-All paths are relative — no configuration needed.
-
-## 🗂️ Project Structure
+## 🗂️ Project structure
 
 ```
 ├── src/
-│   ├── index.html              # Main application
-│   ├── css/styles.css          # Styles (dark/light theme)
+│   ├── index.html              # Two-pane workspace (editor + live output)
+│   ├── css/styles.css          # Styles (dark/light theme via CSS variables)
 │   └── js/
-│       ├── app.js              # UI logic, event handlers
-│       ├── nfc-generator.js    # NFC/NDEF byte-level generation
-│       ├── vcard-parser.js     # vCard parsing + preview
-│       ├── background.js       # Particle canvas animation
-│       └── serial.js           # WebSerial Flipper communication
-├── tests/
-│   ├── logic_tests.js            # Core parser and generator unit tests
-│   └── generate-test-vcards.js   # Script to generate 150+ vCard 4.0 edge cases
-├── .github/workflows/deploy.yml
-├── .editorconfig
-├── .gitignore
-├── CHANGELOG.md
-├── CONTRIBUTING.md
-├── LICENSE                     # GPL v3 (original, unmodified)
-└── README.md
+│       ├── vcard-standard.js   # Property/parameter registry + shared codecs
+│       ├── vcard-parser.js     # Lenient reader (2.1/3.0/4.0 → model)
+│       ├── vcard-serializer.js # Strict writer (model → compliant text)
+│       ├── vcard-validator.js  # Per-version diagnostics
+│       ├── nfc-generator.js    # Flipper .nfc generation (NTAG213/215/216)
+│       ├── serial.js           # WebSerial transfer to the Flipper
+│       ├── background.js       # Particle canvas
+│       └── app.js              # UI orchestration
+├── tests/                      # node tests/run-tests.js (no dependencies)
+├── docs/
+│   ├── adr/                    # Architecture decision records
+│   └── reference/vcard-compliance.md  # The compliance rulebook, cited to the specs
+├── AGENTS.md                   # Canonical agent/contributor rules (CLAUDE.md imports it)
+└── .github/workflows/deploy.yml  # CI: tests + validation + GitHub Pages deploy
 ```
 
 ## 🧪 Testing
 
-The project includes an extensive logic test suite that runs without a browser:
 ```bash
-node tests/logic_tests.js
+node tests/run-tests.js
 ```
 
-There is also a generator script that creates 150 comprehensive mock vCards covering all RFC 6350 properties, datatypes, and encoding edge cases (used to verify parser integrity):
-```bash
-node tests/generate-test-vcards.js
-```
+72 tests cover the compliance matrix (folding, escaping, QP, version conversion,
+cardinality, round trips) and the NFC layer invariants (BCC checksums, CC bytes,
+TLV lengths, NDEF flags). CI runs them on every push and pull request.
+
+## 📚 Standards implemented
+
+- **vCard 2.1** — versit Consortium specification (1996)
+- **vCard 3.0** — [RFC 2426](https://www.rfc-editor.org/rfc/rfc2426) / [RFC 2425](https://www.rfc-editor.org/rfc/rfc2425)
+- **vCard 4.0** — [RFC 6350](https://www.rfc-editor.org/rfc/rfc6350) + [RFC 6868](https://www.rfc-editor.org/rfc/rfc6868)
+- **NFC** — NFC Forum NDEF / Type 2 Tag layout for NTAG213/215/216, Flipper NFC file format v4
+
+The distilled, citation-backed rulebook lives in
+[docs/reference/vcard-compliance.md](docs/reference/vcard-compliance.md).
 
 ## 🗺️ Roadmap
 
-Future improvements (tracked as TODO comments in code):
-- [ ] Manual multi-record tag creation (arbitrary record types)
-- [ ] VCF hosting service integration
-- [ ] PHOTO property: display photo from URL or base64-encoded data, convert URL to encoded, save encoded photo as file
-- [ ] LOGO property: display and edit organization logos (URL and encoded)
-- [ ] SOUND property: audio playback and editing support
-- [ ] KEY property: cryptographic key display and management
+- [ ] PHOTO/LOGO preview and file-to-`data:`-URI conversion in the editor
+- [ ] Multi-card .vcf files (the parser already reads streams)
+- [ ] Editable parameters on imported passthrough properties
 
 ## 🤝 Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for repo layout, coding conventions, and how to add new NFC record types.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md). Notable decisions are
+recorded in [docs/adr/](docs/adr/).
 
 ## 📜 Licensing
 
-This project is licensed under the **GNU General Public License v3**.
+Licensed under the **GNU General Public License v3**.
 
 ```
 Original work Copyright (c) jaylikesbunda
 Modifications Copyright (c) PBNZ 2026
 ```
 
-The full license text is in the [LICENSE](LICENSE) file. All source files include a GPL header comment. This fork complies with GPL v3 requirements — source code is publicly available and the original license is preserved.
-
 ## ⚠️ Disclaimer
 
-This tool is for educational and personal use only. Ensure you have the right to create and use NFC tags before deploying them. The creators are not responsible for any misuse.
+This tool is for educational and personal use. Ensure you have the right to create and use
+NFC tags before deploying them.

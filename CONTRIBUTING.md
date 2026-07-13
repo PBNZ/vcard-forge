@@ -1,77 +1,42 @@
-# Contributing to Flipper NFC Maker Plus
+# Contributing to VCF Pro
 
-Thanks for your interest in contributing! This guide covers the repo layout,
-coding conventions, and how to add new features.
+Thanks for your interest! Start with [AGENTS.md](AGENTS.md) — it is the canonical rulebook
+(layout map, hard rules, architecture). This file covers the practical workflow.
 
-## Repo Layout
+## Working locally
 
-```
-src/
-├── index.html              # Main HTML — all UI structure
-├── css/styles.css          # All styles (CSS custom properties for theming)
-└── js/
-    ├── app.js              # UI logic, event handlers, theme management
-    ├── nfc-generator.js    # NFC/NDEF byte-level generation (NfcNtag class)
-    ├── vcard-parser.js     # vCard validation, parsing, preview rendering
-    ├── background.js       # Particle canvas animation
-    └── serial.js           # WebSerial communication with Flipper Zero
-```
+1. Open `src/index.html` in a browser — no build step, no server, no `npm install`.
+2. Run the tests before and after your change:
+   ```bash
+   node tests/run-tests.js
+   ```
+3. For WebSerial (Send to Flipper), use Chrome or Edge on desktop.
 
-Scripts are loaded as classic `<script>` tags (not ES modules) so the app
-works with `file://` protocol. Order matters — `nfc-generator.js` and
-`vcard-parser.js` must load before `app.js`.
+## The rules that matter most
 
-## Testing Locally
+- **Vanilla JS only** — no frameworks, bundlers, or dependencies; `file://` must keep working.
+- **Spec changes need spec citations.** Behaviour of the parser/serializer/validator is
+  governed by [docs/reference/vcard-compliance.md](docs/reference/vcard-compliance.md),
+  which cites versit 2.1, RFC 2425/2426, RFC 6350, and RFC 6868. If your change touches
+  compliance behaviour, update that document (with the section reference) and add a test.
+- **Test first.** New behaviour gets a failing test in `tests/` before the implementation.
+- **CHANGELOG first.** Every user-visible change is recorded under `## [Unreleased]`
+  before committing.
+- **Conventional Commits**, one concern per PR.
+- **GPL v3 header** on new source files, **JSDoc** on functions, 4-space indent, LF endings
+  (`.editorconfig` + `.gitattributes` enforce this).
+- **Decisions get ADRs** — copy `docs/adr/0000-template.md` to the next number.
 
-1. Open `src/index.html` in a browser — that's it
-2. No build step, no server, no `npm install` required
-3. For WebSerial (Send to Flipper), use Chrome on desktop
+## Repo layout
 
-## Coding Conventions
+See the START-HERE map in [AGENTS.md](AGENTS.md) and the structure diagram in
+[README.md](README.md).
 
-- **Vanilla JS only** — no frameworks, no bundlers, no npm dependencies
-- **JSDoc comments** on all functions (params, returns, description)
-- **GPL license header** at the top of every JS file
-- **Small, single-purpose functions** — important for AI context windows
-- **CSS custom properties** for theming — never hardcode colours
-- **Relative paths only** — no leading `/`, no absolute URLs
-- **`.editorconfig`** — 4-space indentation, UTF-8, LF line endings
+## Pull requests
 
-## Adding a New NFC Record Type
-
-1. **`nfc-generator.js`**: Add a `generateXxxTag(data)` method to `NfcNtag`:
-   - Call `this._generateUid()`, `this._writeHeaderPages()`
-   - Use `buildNdefRecord()` with the correct TNF and type bytes
-   - Wrap in `wrapInTlv()` and call `this._writeNdefData()`
-   - Call `this._writeEndPages()`
-
-2. **`src/index.html`**: Add a `<option>` to `#tagType` select and
-   matching `data-field` input groups in `#inputFields`
-
-3. **`src/js/app.js`**: Add the type to:
-   - `generateNFCData()` data collection (input → inputData)
-   - `isValidInput()` validation
-   - The tag type routing section (which generator method to call)
-
-4. **Test** with all three NTAG types (213/215/216)
-
-## AI-Development-Friendly
-
-This repo is intentionally structured for AI-assisted development:
-
-- **Clear file boundaries** — each file has a single, documented purpose
-- **JSDoc annotations** — AI tools can understand function contracts
-- **Small functions** — fit within typical AI context windows
-- **Section headers** — `/* SECTION: ... */` comments for navigation
-- **`.editorconfig`** — consistent formatting regardless of editor/AI tool
-- **No build step** — changes are instantly testable
-
-### 🛑 AI Workflow Requirement
-**All AI agents MUST update `CHANGELOG.md` before committing or pushing changes to any branch.** Do not leave changelog updates as an afterthought.
-
-**All AI agents MUST obtain explicit user approval before pushing directly to the `main` branch.**
+Use the PR template. CI must be green (syntax checks + the full test suite). Maintainer
+approval is required before anything lands on `main`.
 
 ## License
 
-All contributions must be compatible with **GNU GPL v3**. Add the GPL header
-to any new source files. Do not introduce dependencies with incompatible licenses.
+All contributions must be GPL v3 compatible.
