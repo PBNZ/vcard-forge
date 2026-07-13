@@ -1,8 +1,9 @@
 /**
  * @file app.js
- * @description Main UI logic, event handlers, and theme management for
- *              Flipper NFC Maker Plus. Orchestrates user input, NFC tag
- *              generation via nfc-generator.js, and file download.
+ * @description UI orchestration for VCF Pro: renders the property editor from
+ *              the standards registry, keeps the card model in sync with the
+ *              inputs, live-serializes and validates on every change, and
+ *              drives .vcf / .nfc export and Flipper WebSerial transfer.
  *
  * Original work Copyright (c) jaylikesbunda
  * Modifications Copyright (c) PBNZ 2026
@@ -21,1174 +22,812 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+'use strict';
+/* global vcardPropertyDef, vcardPropertyAvailable, parseVCard, serializeVCard,
+   validateVCard, NfcNtag, NTAG_CONFIG, FlipperSerial */
+
 document.addEventListener('DOMContentLoaded', () => {
 
     /* ========================================================================
-     * SECTION: DOM References
+     * SECTION: State
      * ===================================================================== */
 
-    const tagTypeSelect = document.getElementById('tagType');
-    const nfcTagTypeRadios = document.querySelectorAll('input[name="nfcTagType"]');
-    const generateButton = document.getElementById('generateButton');
-    const outputSection = document.getElementById('outputSection');
-    const nfcDataOutput = document.getElementById('nfcData');
-    const downloadButton = document.getElementById('downloadButton');
-    const themeToggle = document.getElementById('themeToggle');
-
-    const inputFieldsContainer = document.getElementById('inputFields');
-    const allInputGroups = inputFieldsContainer.querySelectorAll('.data-field');
-
-    // --- Capacity Display ---
-    const globalCapacitySection = document.getElementById('globalCapacitySection');
-    const globalCapacityBar = document.getElementById('globalCapacityBar');
-    const globalCapacityText = document.getElementById('globalCapacityText');
-    const capacityWarning = document.getElementById('capacityWarning');
-
-    // --- vCard Wizard ---
-    const vcardCompatRadios = document.querySelectorAll('input[name="vcardCompatMode"]');
-    const vcardUrlGroup = document.getElementById('vcardUrlGroup');
-
-    const vcardModeRadios = document.querySelectorAll('input[name="vcardInputMode"]');
-    const vcardModePanels = {
-        paste: document.getElementById('vcardModePaste'),
-        scratch: document.getElementById('vcardEditorForm')
+    /** Central application state; `model` is the single source of truth. */
+    const state = {
+        version: '4.0',
+        model: { version: '4.0', properties: [], warnings: [] },
+        ntag: 'NTAG216',
+        compat: 'dual',
+        lastSerialized: '',
+        parseWarnings: []
     };
 
-    const vcardHostedUrlInput = document.getElementById('vcardHostedUrlInput');
-    const vcardFetchButton = document.getElementById('vcardFetchButton');
-    const vcardPasteTextarea = document.getElementById('vcardPasteTextarea');
-    const vcardProcessPasteBtn = document.getElementById('vcardProcessPasteBtn');
-
-    const vcardSectionsContainer = document.getElementById('vcardSectionsContainer');
-    const vcardVersionSelect = document.getElementById('vcardVersionSelect');
-    const vcardCheckStatus = document.getElementById('vcardCheckStatus');
-    const vcardOptimizeBtn = document.getElementById('vcardOptimizeBtn');
-    const vcardUndoBtn = document.getElementById('vcardUndoBtn');
-    const vcardClearBtn = document.getElementById('vcardClearBtn');
-    const downloadVcfBtn = document.getElementById('downloadVcfBtn');
-
-    /** Map of standard input elements */
-    const inputs = {
-        urlInput: document.getElementById('urlInput'),
-        textInput: document.getElementById('textInput'),
-        phoneInput: document.getElementById('phoneInput'),
-        emailInput: document.getElementById('emailInput'),
-        ssidInput: document.getElementById('ssidInput'),
-        passwordInput: document.getElementById('passwordInput'),
-        authTypeSelect: document.getElementById('authTypeSelect'),
-        latitudeInput: document.getElementById('latitudeInput'),
-        longitudeInput: document.getElementById('longitudeInput'),
-        smsNumberInput: document.getElementById('smsNumberInput'),
-        smsBodyInput: document.getElementById('smsBodyInput'),
-        packageNameInput: document.getElementById('packageNameInput'),
-        mimeTypeInput: document.getElementById('mimeTypeInput'),
-        mimeDataInput: document.getElementById('mimeDataInput'),
-        facetimeInput: document.getElementById('facetimeInput'),
-        addressInput: document.getElementById('addressInput'),
-        homeKitCodeInput: document.getElementById('homeKitCodeInput'),
-        filenameInput: document.getElementById('filenameInput')
-    };
-
-    let lastInputData = '';
     let flipperSerial = null;
-    let currentVcardProps = []; // { key: string, param: string, value: string }
-    let currentVcardPropsHistory = null; // Store for Undo
-    let activeVcardMode = 'scratch';
 
     /* ========================================================================
-     * SECTION: Theme Management
+     * SECTION: DOM references
+     * ===================================================================== */
+
+    const $ = (id) => document.getElementById(id);
+    const editorSections = $('editorSections');
+    const sourcePreview = $('sourcePreview');
+    const validationPanel = $('validationPanel');
+    const byteCounter = $('byteCounter');
+    const capacityBar = $('capacityBar');
+    const capacityText = $('capacityText');
+    const capacityWarning = $('capacityWarning');
+    const hostedUrlGroup = $('hostedUrlGroup');
+    const hostedUrlInput = $('hostedUrlInput');
+    const downloadVcfBtn = $('downloadVcfBtn');
+    const copyVcfBtn = $('copyVcfBtn');
+    const downloadNfcBtn = $('downloadNfcBtn');
+    const sendFlipperBtn = $('sendFlipperBtn');
+    const flipperStatus = $('flipperStatus');
+
+    /* ========================================================================
+     * SECTION: Model helpers
      * ===================================================================== */
 
     /**
-     * Initialise theme based on: saved preference > system preference > dark default.
+     * Flatten a model value to a plain string.
+     * @param {string|string[]|string[][]} value - Model value.
+     * @returns {string} Flat text.
      */
-    function initTheme() {
-        const saved = localStorage.getItem('theme');
-        const html = document.documentElement;
-
-        if (saved) {
-            html.setAttribute('data-theme', saved);
-        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
-            html.setAttribute('data-theme', 'light');
-        } else {
-            html.setAttribute('data-theme', 'dark');
+    function flat(value) {
+        if (Array.isArray(value)) {
+            return value.map(v => Array.isArray(v) ? v.join(',') : v).join(';');
         }
-        updateThemeToggleText();
+        return String(value == null ? '' : value);
     }
 
-    /** Update the theme toggle button text to reflect current state. */
-    function updateThemeToggleText() {
-        if (!themeToggle) return;
-        const current = document.documentElement.getAttribute('data-theme') || 'dark';
-        themeToggle.textContent = current === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+    /**
+     * Whether a property holds no user content (structural separators ignored).
+     * @param {Object} prop - Property object.
+     * @returns {boolean} True when effectively empty.
+     */
+    function isEmptyProp(prop) {
+        return flat(prop.value).replace(/[;,\s]/g, '') === '';
     }
 
-    if (themeToggle) {
-        themeToggle.addEventListener('click', () => {
-            const html = document.documentElement;
-            const current = html.getAttribute('data-theme') || 'dark';
-            const next = current === 'dark' ? 'light' : 'dark';
-            html.setAttribute('data-theme', next);
-            localStorage.setItem('theme', next);
-            updateThemeToggleText();
-        });
+    /** All model properties with the given name. */
+    const propsOf = (name) => state.model.properties.filter(p => p.name === name);
+
+    /**
+     * Get the first property with the given name, creating it when missing.
+     * @param {string} name - Property name.
+     * @param {*} initialValue - Value used when creating.
+     * @returns {Object} The property object (live reference into the model).
+     */
+    function getOrCreate(name, initialValue) {
+        let prop = state.model.properties.find(p => p.name === name);
+        if (!prop) {
+            prop = { group: null, name, params: [], value: initialValue };
+            state.model.properties.push(prop);
+        }
+        return prop;
     }
 
-    initTheme();
-
-    // Listen for system theme changes
-    if (window.matchMedia) {
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-            if (!localStorage.getItem('theme')) {
-                document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
-                updateThemeToggleText();
-            }
-        });
+    /** Remove a property object from the model. */
+    function removeProp(prop) {
+        const i = state.model.properties.indexOf(prop);
+        if (i > -1) state.model.properties.splice(i, 1);
     }
+
+    /**
+     * Model copy with empty properties pruned, ready for serialize/validate.
+     * @returns {Object} Export model (shares property references; not mutated downstream).
+     */
+    function exportModel() {
+        return {
+            version: state.model.version,
+            properties: state.model.properties.filter(p => !isEmptyProp(p))
+        };
+    }
+
+    /** Names the structured editor owns; everything else renders as passthrough. */
+    const EDITOR_OWNED = new Set(['FN', 'N', 'NICKNAME', 'ORG', 'TITLE', 'ROLE', 'TEL', 'EMAIL',
+        'IMPP', 'URL', 'ADR', 'BDAY', 'ANNIVERSARY', 'GENDER', 'KIND', 'LANG', 'NOTE',
+        'CATEGORIES', 'UID']);
 
     /* ========================================================================
-     * SECTION: Input Field Visibility
+     * SECTION: Editor rendering
      * ===================================================================== */
 
-    function getSelectedNfcTagType() {
-        const selected = document.querySelector('input[name="nfcTagType"]:checked');
-        return selected ? selected.value : 'NTAG216';
+    /** Build an element with attributes and children. */
+    function el(tag, attrs, ...children) {
+        const node = document.createElement(tag);
+        for (const [k, v] of Object.entries(attrs || {})) {
+            if (k === 'class') node.className = v;
+            else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+            else if (k === 'text') node.textContent = v;
+            else node.setAttribute(k, v);
+        }
+        for (const child of children) if (child) node.appendChild(child);
+        return node;
     }
 
-    function handleTagTypeChange() {
-        const tagType = getSelectedNfcTagType();
-        const compatContainer = document.getElementById('vcardCompatContainer');
-        const urlGroup = document.getElementById('vcardUrlGroup');
-        const requiredBadge = urlGroup ? urlGroup.querySelector('.required-badge') : null;
-        const fieldHint = urlGroup ? urlGroup.querySelector('.field-hint') : null;
+    /** Labelled input group bound to a getter/setter pair. */
+    function boundField(label, opts) {
+        const input = el(opts.textarea ? 'textarea' : 'input', {
+            class: opts.mono ? 'mono' : '',
+            placeholder: opts.placeholder || ''
+        });
+        if (!opts.textarea) input.type = opts.type || 'text';
+        if (opts.textarea) input.rows = opts.rows || 3;
+        input.value = opts.get() || '';
+        input.addEventListener('input', () => { opts.set(input.value); refreshOutput(); });
+        const group = el('div', { class: 'input-group' + (opts.span2 ? ' span-2' : '') },
+            el('label', { text: label }), input);
+        if (opts.hint) group.appendChild(el('p', { class: 'field-hint', text: opts.hint }));
+        return group;
+    }
 
-        if (tagType === 'VCARD_EDIT') {
-            tagTypeSelect.value = 'Contact';
-            Array.from(tagTypeSelect.options).forEach(opt => {
-                opt.disabled = opt.value !== 'Contact';
+    /** Section card with availability-aware content. */
+    function sectionCard(title, hiddenCount, ...children) {
+        const header = el('div', { class: 'section-header' }, el('h2', { text: title }));
+        if (hiddenCount > 0) {
+            header.appendChild(el('span', {
+                class: 'section-hint',
+                text: `${hiddenCount} field${hiddenCount > 1 ? 's' : ''} not in ${state.version}`
+            }));
+        }
+        return el('div', { class: 'card section-card' }, header, ...children);
+    }
+
+    /** Read component i of a structured value as an editable string. */
+    const comp = (prop, i) => (prop.value[i] || []).join(',');
+    /** Write component i of a structured value from an editable string. */
+    function setComp(prop, i, text, split) {
+        while (prop.value.length <= i) prop.value.push(['']);
+        prop.value[i] = split ? text.split(',').map(s => s.trim()) : [text];
+    }
+
+    /** TYPE chip set bound to a property's TYPE parameter. */
+    function chipSet(prop) {
+        const def = vcardPropertyDef(prop.name);
+        const vocabulary = (def && def.typeValues && def.typeValues[state.version]) || [];
+        const wrap = el('div', { class: 'chip-set' });
+        const typeParam = () => (prop.params || []).find(p => p.name === 'TYPE');
+        for (const value of vocabulary) {
+            if (value === 'pref') continue; // handled by the ★ toggle
+            const isOn = () => {
+                const t = typeParam();
+                return !!t && t.values.some(v => v.toLowerCase() === value);
+            };
+            const chip = el('span', {
+                class: 'chip' + (isOn() ? ' chip-on' : ''),
+                text: value,
+                onclick: () => {
+                    let t = typeParam();
+                    if (!t) { t = { name: 'TYPE', values: [] }; prop.params.push(t); }
+                    if (isOn()) {
+                        t.values = t.values.filter(v => v.toLowerCase() !== value);
+                        if (t.values.length === 0) prop.params = prop.params.filter(p => p !== t);
+                    } else {
+                        t.values.push(value);
+                    }
+                    chip.classList.toggle('chip-on');
+                    refreshOutput();
+                }
             });
-            globalCapacitySection.style.display = 'none';
-            // Hide compat toggle — no NFC tag being created
-            if (compatContainer) compatContainer.style.display = 'none';
-            // URL stays for importing, but remove Required indicator and helper
-            if (requiredBadge) requiredBadge.style.display = 'none';
-            if (fieldHint) fieldHint.style.display = 'none';
-            // Ensure URL group is visible for fetching
-            if (urlGroup) urlGroup.style.display = 'block';
-        } else {
-            Array.from(tagTypeSelect.options).forEach(opt => opt.disabled = false);
-            globalCapacitySection.style.display = 'block';
-            // Restore compat toggle
-            if (compatContainer) compatContainer.style.display = '';
-            // Restore Required badge and helper text
-            if (requiredBadge) requiredBadge.style.display = '';
-            if (fieldHint) fieldHint.style.display = '';
+            wrap.appendChild(chip);
         }
-        showRelevantInputs();
-        updateCapacityDisplay();
+        return wrap;
     }
 
-    function showRelevantInputs() {
-        const selectedType = tagTypeSelect.value;
-        const nfcTagType = getSelectedNfcTagType();
-
-        // Hide all standard input groups
-        allInputGroups.forEach(group => group.style.display = 'none');
-
-        // Show groups matching the selected type
-        allInputGroups.forEach(group => {
-            const types = group.getAttribute('data-type').split(' ');
-            if (types.includes(selectedType)) {
-                group.style.display = 'block';
+    /** ★ preferred toggle bound to the PREF parameter (converted per version on export). */
+    function prefToggle(prop) {
+        const hasPref = () => (prop.params || []).some(p => p.name === 'PREF' ||
+            (p.name === 'TYPE' && p.values.some(v => v.toLowerCase() === 'pref')));
+        const btn = el('button', {
+            class: 'pref-toggle' + (hasPref() ? ' pref-on' : ''),
+            title: 'Mark as preferred',
+            text: '★',
+            onclick: () => {
+                if (hasPref()) {
+                    prop.params = prop.params.filter(p => p.name !== 'PREF');
+                    const t = prop.params.find(p => p.name === 'TYPE');
+                    if (t) {
+                        t.values = t.values.filter(v => v.toLowerCase() !== 'pref');
+                        if (t.values.length === 0) prop.params = prop.params.filter(p => p !== t);
+                    }
+                } else {
+                    prop.params.push({ name: 'PREF', values: ['1'] });
+                }
+                btn.classList.toggle('pref-on');
+                refreshOutput();
             }
         });
-
-        if (nfcTagType === 'VCARD_EDIT' || selectedType !== 'Contact') {
-            globalCapacitySection.style.display = 'none';
-        } else {
-            globalCapacitySection.style.display = 'block';
-        }
-
-        if (selectedType === 'Contact' && downloadVcfBtn) {
-            downloadVcfBtn.style.display = 'block';
-        } else if (downloadVcfBtn) {
-            downloadVcfBtn.style.display = 'none';
-        }
-
-        if (generateButton) {
-            generateButton.style.display = nfcTagType === 'VCARD_EDIT' ? 'none' : 'block';
-        }
-
-        // Hide output sections when type changes
-        if (outputSection) outputSection.classList.add('hidden');
-        updateCapacityDisplay();
+        btn.type = 'button';
+        return btn;
     }
 
-    /* ========================================================================
-     * SECTION: Filename Helpers
-     * ===================================================================== */
+    /** One row for a multi-instance simple property (TEL/EMAIL/IMPP/URL). */
+    function multiRow(prop, opts, container) {
+        const input = el('input', { placeholder: opts.placeholder || '' });
+        input.type = opts.type || 'text';
+        input.value = flat(prop.value);
+        input.addEventListener('input', () => { prop.value = input.value; refreshOutput(); });
+        const row = el('div', { class: 'prop-row' },
+            chipSet(prop),
+            el('div', { class: 'input-group' }, input),
+            el('div', { class: 'prop-row-side' },
+                prefToggle(prop),
+                el('button', {
+                    class: 'btn-icon', title: 'Remove', text: '✕', type: 'button',
+                    onclick: () => { removeProp(prop); row.remove(); refreshOutput(); }
+                })));
+        container.appendChild(row);
+    }
+
+    /** Multi-instance property section body (rows + add button). */
+    function multiSection(name, opts) {
+        const box = el('div', {});
+        const rows = el('div', {});
+        for (const prop of propsOf(name)) multiRow(prop, opts, rows);
+        box.appendChild(rows);
+        box.appendChild(el('button', {
+            class: 'btn-add-row', text: `+ Add ${opts.label}`, type: 'button',
+            onclick: () => {
+                const prop = { group: null, name, params: [], value: '' };
+                state.model.properties.push(prop);
+                multiRow(prop, opts, rows);
+                rows.lastChild.querySelector('input').focus();
+            }
+        }));
+        return box;
+    }
+
+    /** Address block editor for one ADR property. */
+    function adrBlock(prop, container) {
+        const fields = [
+            { label: 'Street', i: 2, span2: true }, { label: 'Apt / suite', i: 1 },
+            { label: 'PO box', i: 0 }, { label: 'City', i: 3 },
+            { label: 'Region / state', i: 4 }, { label: 'Postal code', i: 5 },
+            { label: 'Country', i: 6 }
+        ];
+        const grid = el('div', { class: 'field-grid' });
+        for (const f of fields) {
+            grid.appendChild(boundField(f.label, {
+                span2: f.span2,
+                get: () => comp(prop, f.i),
+                set: (v) => setComp(prop, f.i, v, false)
+            }));
+        }
+        const block = el('div', { class: 'adr-block' },
+            el('div', { class: 'adr-block-header' },
+                chipSet(prop),
+                el('div', { class: 'prop-row-side' },
+                    prefToggle(prop),
+                    el('button', {
+                        class: 'btn-icon', title: 'Remove address', text: '✕', type: 'button',
+                        onclick: () => { removeProp(prop); block.remove(); refreshOutput(); }
+                    }))),
+            grid);
+        container.appendChild(block);
+    }
 
     /**
-     * Sanitise a string for use as a filename.
-     * @param {string} name - Raw filename string.
-     * @returns {string} Sanitised, lowercased filename.
+     * Render the full editor from the current model and target version.
+     * Called on load, import, version change, and Clear — not on keystrokes.
      */
-    function sanitizeFilename(name) {
-        return name.replace(/[^a-z0-9_\-]/gi, '_').toLowerCase();
-    }
+    function renderEditor() {
+        editorSections.innerHTML = '';
+        const v = state.version;
+        const available = (name) => vcardPropertyAvailable(name, v);
+        const hiddenIn = (names) => names.filter(n => !available(n)).length;
 
-    /**
-     * Generate a filename for the .nfc download.
-     * Uses the user-provided filename or auto-generates from tag type and input data.
-     * @param {string} [tagType] - Override tag type label.
-     * @returns {string} The filename (without .nfc extension).
-     */
-    function generateFilename(tagType) {
-        const type = tagType || document.getElementById('tagType').value;
-
-        if (inputs.filenameInput && inputs.filenameInput.value.trim()) {
-            return inputs.filenameInput.value.trim();
+        /* --- Identity --- */
+        {
+            const n = getOrCreate('N', [[''], [''], [''], [''], ['']]);
+            const nameGrid = el('div', { class: 'field-grid' },
+                boundField('Prefix', { get: () => comp(n, 3), set: (x) => setComp(n, 3, x, true), placeholder: 'Dr.' }),
+                boundField('Given name', { get: () => comp(n, 1), set: (x) => setComp(n, 1, x, true), placeholder: 'Jane' }),
+                boundField('Additional names', { get: () => comp(n, 2), set: (x) => setComp(n, 2, x, true), placeholder: 'Q.' }),
+                boundField('Family name', { get: () => comp(n, 0), set: (x) => setComp(n, 0, x, true), placeholder: 'Doe' }),
+                boundField('Suffix', { get: () => comp(n, 4), set: (x) => setComp(n, 4, x, true), placeholder: 'PhD' }));
+            const children = [
+                boundField('Displayed name (FN)', {
+                    get: () => flat(getOrCreate('FN', '').value),
+                    set: (x) => { getOrCreate('FN', '').value = x; },
+                    placeholder: 'Dr. Jane Q. Doe, PhD',
+                    hint: v === '2.1' ? 'Optional in 2.1 — N below is the required name.' :
+                        'Required — how the name is displayed.'
+                }),
+                nameGrid
+            ];
+            if (available('NICKNAME')) {
+                children.push(boundField('Nicknames (comma-separated)', {
+                    get: () => Array.isArray(getOrCreate('NICKNAME', []).value) ? getOrCreate('NICKNAME', []).value.join(', ') : '',
+                    set: (x) => { getOrCreate('NICKNAME', []).value = x.split(',').map(s => s.trim()).filter(Boolean); },
+                    placeholder: 'JD, Janie'
+                }));
+            }
+            editorSections.appendChild(sectionCard('Identity', hiddenIn(['NICKNAME']), ...children));
         }
 
-        const sanitizedInputData = sanitizeFilename(lastInputData);
-        let filename = `nfc_${type.toLowerCase()}_${sanitizedInputData}`;
-        if (filename.length > 50) {
-            filename = filename.substring(0, 50);
+        /* --- Organization --- */
+        {
+            const org = getOrCreate('ORG', [['']]);
+            editorSections.appendChild(sectionCard('Organization', 0,
+                el('div', { class: 'field-grid' },
+                    boundField('Organization', { get: () => comp(org, 0), set: (x) => setComp(org, 0, x, false), placeholder: 'ACME Corp.' }),
+                    boundField('Unit / department', { get: () => comp(org, 1), set: (x) => setComp(org, 1, x, false), placeholder: 'R&D' }),
+                    boundField('Job title (TITLE)', {
+                        get: () => flat(getOrCreate('TITLE', '').value),
+                        set: (x) => { getOrCreate('TITLE', '').value = x; }, placeholder: 'Chief Engineer'
+                    }),
+                    boundField('Role (ROLE)', {
+                        get: () => flat(getOrCreate('ROLE', '').value),
+                        set: (x) => { getOrCreate('ROLE', '').value = x; }, placeholder: 'Programmer'
+                    }))));
         }
-        return filename;
+
+        /* --- Phones --- */
+        editorSections.appendChild(sectionCard('Phone numbers', 0,
+            multiSection('TEL', { label: 'phone', type: 'tel', placeholder: '+64 21 123 4567' })));
+
+        /* --- Online --- */
+        {
+            const children = [
+                el('div', { class: 'input-group' }, el('label', { text: 'Email addresses' })),
+                multiSection('EMAIL', { label: 'email', type: 'email', placeholder: 'jane@example.com' })
+            ];
+            if (available('IMPP')) {
+                children.push(el('div', { class: 'input-group' }, el('label', { text: 'Instant messaging (IMPP)' })));
+                children.push(multiSection('IMPP', { label: 'IM address', placeholder: 'xmpp:jane@example.com' }));
+            }
+            children.push(el('div', { class: 'input-group' }, el('label', { text: 'Websites' })));
+            children.push(multiSection('URL', { label: 'website', type: 'url', placeholder: 'https://example.com' }));
+            editorSections.appendChild(sectionCard('Email, IM & web', hiddenIn(['IMPP']), ...children));
+        }
+
+        /* --- Addresses --- */
+        {
+            const blocks = el('div', {});
+            for (const prop of propsOf('ADR')) adrBlock(prop, blocks);
+            editorSections.appendChild(sectionCard('Addresses', 0, blocks,
+                el('button', {
+                    class: 'btn-add-row', text: '+ Add address', type: 'button',
+                    onclick: (e) => {
+                        const prop = { group: null, name: 'ADR', params: [], value: [[''], [''], [''], [''], [''], [''], ['']] };
+                        state.model.properties.push(prop);
+                        adrBlock(prop, blocks);
+                        refreshOutput();
+                    }
+                })));
+        }
+
+        /* --- Dates & personal --- */
+        {
+            const dateHint = v === '4.0' ? 'e.g. 19850412 or --0412 (RFC 6350 basic format; dashes are normalized)' : 'e.g. 1985-04-12';
+            const children = [el('div', { class: 'field-grid' },
+                boundField('Birthday (BDAY)', {
+                    get: () => flat(getOrCreate('BDAY', '').value),
+                    set: (x) => { getOrCreate('BDAY', '').value = x; },
+                    placeholder: v === '4.0' ? '19850412' : '1985-04-12', hint: dateHint
+                }),
+                available('ANNIVERSARY') ? boundField('Anniversary', {
+                    get: () => flat(getOrCreate('ANNIVERSARY', '').value),
+                    set: (x) => { getOrCreate('ANNIVERSARY', '').value = x; },
+                    placeholder: '20100815'
+                }) : null)];
+            if (available('GENDER')) {
+                const g = getOrCreate('GENDER', [[''], ['']]);
+                const sexSelect = el('select', {});
+                for (const [value, label] of [['', '—'], ['M', 'Male'], ['F', 'Female'], ['O', 'Other'], ['N', 'None / n.a.'], ['U', 'Unknown']]) {
+                    const opt = el('option', { value, text: label });
+                    if ((comp(g, 0) || '') === value) opt.selected = true;
+                    sexSelect.appendChild(opt);
+                }
+                sexSelect.addEventListener('change', () => { setComp(g, 0, sexSelect.value, false); refreshOutput(); });
+                children.push(el('div', { class: 'field-grid' },
+                    el('div', { class: 'input-group' }, el('label', { text: 'Gender (GENDER)' }), sexSelect),
+                    boundField('Gender identity (free text)', {
+                        get: () => comp(g, 1), set: (x) => setComp(g, 1, x, false), placeholder: 'optional'
+                    })));
+            }
+            if (available('KIND')) {
+                const kind = getOrCreate('KIND', '');
+                const kindSelect = el('select', {});
+                for (const [value, label] of [['', 'individual (default)'], ['individual', 'individual'], ['group', 'group'], ['org', 'organization'], ['location', 'location']]) {
+                    const opt = el('option', { value, text: label });
+                    if (String(kind.value) === value) opt.selected = true;
+                    kindSelect.appendChild(opt);
+                }
+                kindSelect.addEventListener('change', () => { kind.value = kindSelect.value; refreshOutput(); });
+                children.push(el('div', { class: 'field-grid' },
+                    el('div', { class: 'input-group' }, el('label', { text: 'Kind (KIND)' }), kindSelect),
+                    boundField('Languages (LANG, comma-separated)', {
+                        get: () => propsOf('LANG').map(p => flat(p.value)).join(', '),
+                        set: (x) => {
+                            state.model.properties = state.model.properties.filter(p => p.name !== 'LANG');
+                            for (const tag of x.split(',').map(s => s.trim()).filter(Boolean)) {
+                                state.model.properties.push({ group: null, name: 'LANG', params: [], value: tag });
+                            }
+                        },
+                        placeholder: 'en, mi'
+                    })));
+            }
+            editorSections.appendChild(sectionCard('Dates & personal',
+                hiddenIn(['ANNIVERSARY', 'GENDER', 'KIND', 'LANG']), ...children));
+        }
+
+        /* --- Notes & metadata --- */
+        {
+            const children = [
+                boundField('Notes (NOTE)', {
+                    textarea: true, rows: 3,
+                    get: () => flat(getOrCreate('NOTE', '').value),
+                    set: (x) => { getOrCreate('NOTE', '').value = x; },
+                    placeholder: 'Free-form notes — line breaks are encoded per version.'
+                })
+            ];
+            if (available('CATEGORIES')) {
+                children.push(boundField('Categories / tags (comma-separated)', {
+                    get: () => Array.isArray(getOrCreate('CATEGORIES', []).value) ? getOrCreate('CATEGORIES', []).value.join(', ') : '',
+                    set: (x) => { getOrCreate('CATEGORIES', []).value = x.split(',').map(s => s.trim()).filter(Boolean); },
+                    placeholder: 'work, conference'
+                }));
+            }
+            children.push(boundField('Unique ID (UID)', {
+                get: () => flat(getOrCreate('UID', '').value),
+                set: (x) => { getOrCreate('UID', '').value = x; },
+                placeholder: 'urn:uuid:…  (optional)'
+            }));
+            editorSections.appendChild(sectionCard('Notes & metadata', hiddenIn(['CATEGORIES']), ...children));
+        }
+
+        /* --- Other imported properties (passthrough) --- */
+        {
+            const others = state.model.properties.filter(p => !EDITOR_OWNED.has(p.name));
+            if (others.length > 0) {
+                const rows = el('div', {});
+                for (const prop of others) {
+                    const paramText = (prop.params || [])
+                        .map(p => `${p.name}=${p.values.join(',')}`).join(';');
+                    const display = el('textarea', { class: 'readonly-value' });
+                    display.value = flat(prop.value);
+                    display.readOnly = true;
+                    display.rows = 1;
+                    const row = el('div', { class: 'prop-row prop-readonly' },
+                        el('span', { class: 'prop-key-label', text: prop.name + (paramText ? `;${paramText}` : '') }),
+                        el('div', { class: 'input-group' }, display),
+                        el('button', {
+                            class: 'btn-icon', title: 'Remove', text: '✕', type: 'button',
+                            onclick: () => { removeProp(prop); row.remove(); refreshOutput(); }
+                        }));
+                    rows.appendChild(row);
+                }
+                editorSections.appendChild(sectionCard('Other imported properties', 0,
+                    el('p', { class: 'field-hint', text: 'Preserved verbatim on export; not editable here.' }),
+                    rows));
+            }
+        }
     }
 
     /* ========================================================================
-     * SECTION: Input Validation
+     * SECTION: Live output
      * ===================================================================== */
 
-    function formatInlineError(inputElement, msg) {
-        if (!inputElement) return;
-        const parent = inputElement.parentElement;
-        let errDiv = parent.querySelector('.input-error');
-        if (!errDiv) {
-            errDiv = document.createElement('div');
-            errDiv.className = 'input-error';
-            errDiv.style.color = 'var(--accent-warn)';
-            errDiv.style.fontSize = '0.8rem';
-            errDiv.style.marginTop = '4px';
-            parent.appendChild(errDiv);
-        }
-        errDiv.textContent = msg;
-        inputElement.style.borderColor = 'var(--accent-warn)';
-        inputElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-
-    function clearInlineError(inputElement) {
-        if (!inputElement) return;
-        const parent = inputElement.parentElement;
-        const errDiv = parent.querySelector('.input-error');
-        if (errDiv) errDiv.remove();
-        inputElement.style.borderColor = '';
-    }
-
-    function clearAllInlineErrors() {
-        document.querySelectorAll('.input-error').forEach(e => e.remove());
-        document.querySelectorAll('input, select, textarea').forEach(e => e.style.borderColor = '');
-    }
-
-    function isValidInput(type, data, inputElement) {
-        clearInlineError(inputElement);
-        let valid = true;
-        let errorMsg = '';
-
-        switch (type) {
-            case 'Email': {
-                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                valid = emailRegex.test(data.replace(/^mailto:/, ''));
-                if (!valid) errorMsg = 'Please enter a valid email address.';
-                break;
-            }
-            case 'Phone': {
-                const phoneRegex = /^[\d\s\+\-\(\)\[\]\.]{3,}$/;
-                valid = phoneRegex.test(data.replace(/^tel:/, ''));
-                if (!valid) errorMsg = 'Phone number contains invalid characters. Use digits, +, spaces, or hyphens.';
-                break;
-            }
-            case 'URL':
-            case 'SocialMedia': {
-                const urlRegex = /^(https?:\/\/)?([^\s$.?#].[^\s]*)$/i;
-                valid = urlRegex.test(data);
-                if (!valid) errorMsg = 'Please enter a valid URL.';
-                break;
-            }
-            case 'Text':
-                valid = data.length <= 1000;
-                if (!valid) errorMsg = 'Text must be under 1000 characters.';
-                break;
-            case 'WiFi': {
-                const wifiRegex = /^SSID:.+;PASSWORD:.+;AUTH:(WPA|WEP|NONE)$/;
-                valid = wifiRegex.test(data);
-                if (!valid) errorMsg = 'Invalid Wi-Fi configuration.';
-                break;
-            }
-            case 'Geo': {
-                const geoRegex = /^geo:-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
-                valid = geoRegex.test(data);
-                if (!valid) errorMsg = 'Invalid geo-location.';
-                break;
-            }
-            case 'SMS': {
-                const smsRegex = /^sms:\+?\d+\?body=.+$/;
-                valid = smsRegex.test(data);
-                if (!valid) errorMsg = 'Invalid SMS format.';
-                break;
-            }
-            case 'LaunchApp': {
-                const packageRegex = /^[a-zA-Z0-9._]+$/;
-                valid = packageRegex.test(data);
-                if (!valid) errorMsg = 'Invalid Android package name.';
-                break;
-            }
-            case 'CustomMIME': {
-                const [mimeType] = data.split('\n');
-                const mimeRegex = /^[\w\-]+\/[\w\-]+$/;
-                valid = mimeRegex.test(mimeType);
-                if (!valid) errorMsg = 'Invalid MIME type (e.g. application/json).';
-                break;
-            }
-            case 'FaceTime':
-            case 'FaceTimeAudio': {
-                const input = decodeURIComponent(data.replace(/(facetime:\/\/|facetime-audio:\/\/)/i, ''));
-                const emailOrPhoneRegex = /^([^\s@]+@[^\s@]+\.[^\s@]+|\+?\d{7,15})$/;
-                valid = emailOrPhoneRegex.test(input);
-                if (!valid) errorMsg = 'Invalid Apple ID or phone number.';
-                break;
-            }
-            case 'AppleMaps':
-                valid = data.trim().length > 0;
-                if (!valid) errorMsg = 'Address cannot be empty.';
-                break;
-            case 'HomeKit': {
-                const homeKitRegex = /^[A-Za-z0-9]{1,64}$/;
-                valid = homeKitRegex.test(data.replace(/^X-HM:\/\//, ''));
-                if (!valid) errorMsg = 'Invalid HomeKit setup payload.';
-                break;
-            }
-            default:
-                valid = false;
-        }
-
-        if (!valid && inputElement) {
-            formatInlineError(inputElement, errorMsg);
-        }
-        return valid;
-    }
-
-    /* ========================================================================
-     * SECTION: Standard NFC Tag Generation
-     * ===================================================================== */
-
-    function generateNFCData() {
-        clearAllInlineErrors();
-        const selectedType = tagTypeSelect.value;
-        const selectedTagType = getSelectedNfcTagType();
-
-        let inputData = '';
-        let inputEl = null;
-
-        // Collect data based on selected type
-        if (selectedType === 'Contact') {
-            // Check for validation errors before generating
-            const invalidProp = currentVcardProps.find(p => p._invalid);
-            if (invalidProp) {
-                const invalidInput = vcardSectionsContainer.querySelector('.input-invalid');
-                if (invalidInput) {
-                    invalidInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    invalidInput.focus();
-                }
-                return;
-            }
-            inputData = generateVcardStringFromEditor();
-            if (selectedTagType === 'VCARD_EDIT') {
-                downloadNFCFile(inputData, 'contact', '.vcf');
-                return;
-            }
-        } else if (selectedType === 'URL' || selectedType === 'SocialMedia') {
-            inputData = inputs.urlInput.value.trim();
-            inputEl = inputs.urlInput;
-        } else if (selectedType === 'FaceTime') {
-            const userId = inputs.facetimeInput.value.trim();
-            inputData = `facetime://${encodeURIComponent(userId)}`;
-            inputEl = inputs.facetimeInput;
-        } else if (selectedType === 'FaceTimeAudio') {
-            const userId = inputs.facetimeInput.value.trim();
-            inputData = `facetime-audio://${encodeURIComponent(userId)}`;
-            inputEl = inputs.facetimeInput;
-        } else if (selectedType === 'AppleMaps') {
-            const address = inputs.addressInput.value.trim();
-            inputData = `http://maps.apple.com/?address=${encodeURIComponent(address)}`;
-            inputEl = inputs.addressInput;
-        } else if (selectedType === 'HomeKit') {
-            const homeKitCode = inputs.homeKitCodeInput.value.trim();
-            inputData = `X-HM://${encodeURIComponent(homeKitCode)}`;
-            inputEl = inputs.homeKitCodeInput;
-        } else if (selectedType === 'Text') {
-            inputData = inputs.textInput.value.trim();
-            inputEl = inputs.textInput;
-        } else if (selectedType === 'Phone') {
-            inputData = `tel:${inputs.phoneInput.value.trim().replace(/[\s\(\)\[\]\-]/g, '')}`; // strip formatting for tel: URI
-            inputEl = inputs.phoneInput;
-        } else if (selectedType === 'Email') {
-            inputData = `mailto:${inputs.emailInput.value.trim()}`;
-            inputEl = inputs.emailInput;
-        } else if (selectedType === 'WiFi') {
-            const ssid = inputs.ssidInput.value.trim();
-            const password = inputs.passwordInput.value.trim();
-            const auth = inputs.authTypeSelect.value;
-            inputData = `SSID:${ssid};PASSWORD:${password};AUTH:${auth}`;
-        } else if (selectedType === 'Geo') {
-            const lat = inputs.latitudeInput.value.trim();
-            const lng = inputs.longitudeInput.value.trim();
-            inputData = `geo:${lat},${lng}`;
-            inputEl = inputs.latitudeInput;
-        } else if (selectedType === 'SMS') {
-            const number = inputs.smsNumberInput.value.trim();
-            const body = encodeURIComponent(inputs.smsBodyInput.value.trim());
-            inputData = `sms:${number}?body=${body}`;
-            inputEl = inputs.smsNumberInput;
-        } else if (selectedType === 'LaunchApp') {
-            inputData = inputs.packageNameInput.value.trim();
-            inputEl = inputs.packageNameInput;
-        } else if (selectedType === 'CustomMIME') {
-            const mimeType = inputs.mimeTypeInput.value.trim();
-            const data = inputs.mimeDataInput.value.trim();
-            inputData = `${mimeType}\n${data}`;
-            inputEl = inputs.mimeTypeInput;
-        }
-
-        if (!inputData) {
-            alert('Please enter data');
-            return;
-        }
-
-        if (selectedType !== 'Contact' && !isValidInput(selectedType, inputData, inputEl)) {
-            // Valid error is displayed inline
-            return;
-        }
-
-        lastInputData = inputData;
-
-        try {
-            const nfcTag = new NfcNtag(selectedTagType);
-
-            // Route to appropriate generator
-            if (['FaceTime', 'FaceTimeAudio', 'AppleMaps', 'HomeKit', 'URL',
-                'SocialMedia', 'Phone', 'Email', 'Geo', 'SMS'].includes(selectedType)) {
-                nfcTag.generateUrlTag(inputData);
-            } else if (selectedType === 'WiFi') {
-                nfcTag.generateWifiTag(inputData);
-            } else if (selectedType === 'Contact') {
-                const compatMode = document.querySelector('input[name="vcardCompatMode"]:checked').value;
-                const url = vcardHostedUrlInput.value.trim();
-                if (compatMode === 'dual' && !url) {
-                    formatInlineError(vcardHostedUrlInput, 'Hosted VCF URL is required for iOS + Android mode');
-                    return;
-                }
-                if (compatMode === 'dual' && url && (NfcNtag.calculateDualRecordSize(inputData, url) <= NTAG_CONFIG[selectedTagType].ndefCapacity)) {
-                    nfcTag.generateDualRecordBusinessCard(inputData, url);
-                } else {
-                    nfcTag.generateVcardTag(inputData);
-                }
-            } else if (selectedType === 'LaunchApp') {
-                nfcTag.generateAarTag(inputData);
-            } else if (selectedType === 'CustomMIME') {
-                const [mimeType, ...contentParts] = inputData.split('\n');
-                nfcTag.generateCustomMimeTag(mimeType, contentParts.join('\n'));
+    /** Render the serialized source with lightweight, safe syntax highlighting. */
+    function renderPreview(text) {
+        sourcePreview.innerHTML = '';
+        for (const line of text.split('\r\n')) {
+            const lineEl = document.createElement('div');
+            const colon = line.indexOf(':');
+            if (colon > 0 && !line.startsWith(' ') && !line.startsWith('\t')) {
+                const head = line.slice(0, colon);
+                const semi = head.indexOf(';');
+                const name = semi === -1 ? head : head.slice(0, semi);
+                const params = semi === -1 ? '' : head.slice(semi);
+                lineEl.appendChild(el('span', { class: 'tok-name', text: name }));
+                if (params) lineEl.appendChild(el('span', { class: 'tok-param', text: params }));
+                lineEl.appendChild(el('span', { class: 'tok-delim', text: ':' }));
+                lineEl.appendChild(document.createTextNode(line.slice(colon + 1)));
             } else {
-                nfcTag.generateUrlTag(inputData);
+                lineEl.textContent = line || ' ';
             }
+            sourcePreview.appendChild(lineEl);
+        }
+    }
 
-            displayOutput(nfcTag.exportData());
-        } catch (error) {
-            alert(error.message);
-            console.error(error);
+    /** Render diagnostics (+ conversion drops and parse warnings) into the panel. */
+    function renderDiagnostics(diags, dropped) {
+        validationPanel.innerHTML = '';
+        const entries = [
+            ...diags.map(d => ({ cls: `diag-${d.severity}`, icon: d.severity === 'error' ? '✕' : '⚠', prop: d.property, msg: d.message })),
+            ...dropped.map(d => ({ cls: 'diag-info', icon: 'ℹ', prop: d.name, msg: `${d.reason} — dropped on export.` })),
+            ...state.parseWarnings.map(w => ({ cls: 'diag-info', icon: 'ℹ', prop: 'import', msg: w }))
+        ];
+        if (entries.length === 0) {
+            validationPanel.appendChild(el('div', { class: 'diag-ok', text: `✓ Valid vCard ${state.version}` }));
+            return;
+        }
+        for (const e of entries) {
+            validationPanel.appendChild(el('div', { class: `diag ${e.cls}` },
+                el('span', { text: e.icon }),
+                el('span', { class: 'diag-prop', text: e.prop }),
+                el('span', { text: e.msg })));
         }
     }
 
     /**
-     * Display generated NFC data and action buttons in the output section.
-     * @param {string} nfcData - The .nfc file content to display.
+     * Serialize + validate the current model and refresh every output surface:
+     * preview, diagnostics, byte counter, NFC capacity, and button states.
      */
-    function displayOutput(nfcData) {
-        outputSection.innerHTML = '';
+    function refreshOutput() {
+        const model = exportModel();
+        const { text, dropped } = serializeVCard(model, state.version);
+        const diags = validateVCard(model, state.version);
+        const errors = diags.filter(d => d.severity === 'error');
 
-        const heading = document.createElement('h2');
-        heading.textContent = 'Generated NFC Tag Data';
-        outputSection.appendChild(heading);
+        state.lastSerialized = text;
+        renderPreview(text);
+        renderDiagnostics(diags, dropped);
 
-        const dataOutput = document.createElement('pre');
-        dataOutput.id = 'nfcData';
-        dataOutput.textContent = nfcData;
-        outputSection.appendChild(dataOutput);
+        const bytes = new TextEncoder().encode(text).length;
+        byteCounter.textContent = `${bytes} bytes`;
+        downloadVcfBtn.disabled = errors.length > 0;
+        downloadVcfBtn.title = errors.length > 0 ? 'Fix the validation errors first' : '';
 
-        const buttonGroup = document.createElement('div');
-        buttonGroup.className = 'button-group';
+        /* --- NFC capacity --- */
+        const config = NTAG_CONFIG[state.ntag];
+        const url = hostedUrlInput.value.trim();
+        const dual = state.compat === 'dual';
+        hostedUrlGroup.style.display = dual ? '' : 'none';
+        const nfcBytes = dual && url
+            ? NfcNtag.calculateDualRecordSize(text, url)
+            : NfcNtag.calculateSingleRecordSize(text);
+        const fits = nfcBytes <= config.ndefCapacity;
+        capacityBar.style.width = `${Math.min((nfcBytes / config.ndefCapacity) * 100, 100)}%`;
+        capacityBar.classList.toggle('over-capacity', !fits);
+        capacityText.textContent = `${nfcBytes} / ${config.ndefCapacity} bytes`;
 
-        const dlButton = document.createElement('button');
-        dlButton.className = 'btn';
-        dlButton.textContent = 'Download .nfc File';
-        dlButton.onclick = () => downloadNFCFile(nfcData);
-        buttonGroup.appendChild(dlButton);
+        let warning = '';
+        if (!fits) {
+            warning = 'Too large for this tag.';
+            if (state.ntag === 'NTAG213' && nfcBytes <= NTAG_CONFIG.NTAG215.ndefCapacity) warning += ' NTAG215 would fit.';
+            else if (state.ntag !== 'NTAG216' && nfcBytes <= NTAG_CONFIG.NTAG216.ndefCapacity) warning += ' NTAG216 would fit.';
+        } else if (dual && !url) {
+            warning = 'Enter the hosted .vcf URL for iOS compatibility (or switch to Android only).';
+        }
+        capacityWarning.textContent = warning;
 
-        const sendButton = document.createElement('button');
-        sendButton.className = 'btn btn-secondary';
-        sendButton.id = 'sendToFlipperButton';
-        sendButton.textContent = 'Send to Flipper';
-        sendButton.onclick = sendToFlipper;
-        buttonGroup.appendChild(sendButton);
-
-        outputSection.appendChild(buttonGroup);
-        outputSection.classList.remove('hidden');
+        const nfcReady = errors.length === 0 && fits && (!dual || !!url);
+        downloadNfcBtn.disabled = !nfcReady;
+        sendFlipperBtn.disabled = !nfcReady;
     }
 
-    function downloadNFCFile(nfcData, filenameOverride, extension = '.nfc') {
-        const data = nfcData || document.getElementById('nfcData').textContent;
-        const type = extension === '.vcf' ? 'text/vcard' : 'application/octet-stream';
-        const blob = new Blob([data], { type });
+    /* ========================================================================
+     * SECTION: Import / export
+     * ===================================================================== */
+
+    /** Replace the model with a parsed card and re-render everything. */
+    function loadModel(model) {
+        state.model = model;
+        state.parseWarnings = model.warnings || [];
+        const radio = document.querySelector(`input[name="vcardVersion"][value="${model.version}"]`);
+        if (radio) { radio.checked = true; state.version = model.version; }
+        renderEditor();
+        refreshOutput();
+    }
+
+    /** Sanitized download filename derived from the display name. */
+    function exportFilename() {
+        const fn = flat((state.model.properties.find(p => p.name === 'FN') || { value: '' }).value) ||
+            flat((state.model.properties.find(p => p.name === 'N') || { value: '' }).value);
+        const base = fn.replace(/[^a-z0-9_\- ]/gi, '').trim().replace(/\s+/g, '_').toLowerCase();
+        return base || 'contact';
+    }
+
+    /** Trigger a browser download. */
+    function downloadFile(filename, content, mime) {
+        const blob = new Blob([content], { type: mime });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-
-        let filename;
-        if (filenameOverride) {
-            filename = filenameOverride;
-        } else {
-            filename = generateFilename();
-        }
-
-        a.download = `${filename}${extension}`;
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     }
 
-    /* ========================================================================
-     * SECTION: Capacity Tracking & vCard Wizard Logics
-     * ===================================================================== */
-
-    function measureCurrentPayloadSize() {
-        const selectedType = tagTypeSelect.value;
-        if (selectedType === 'Contact') {
-            return getVcardPayloadSize();
-        }
-        return 0; // Estimation dynamically omitted for standard inputs to keep code simple, users mostly care about VCard sizes.
-    }
-
-    function getVcardPayloadSize() {
-        const vcardData = generateVcardStringFromEditor();
-        const compatMode = document.querySelector('input[name="vcardCompatMode"]:checked').value;
-        const url = compatMode === 'dual' ? vcardHostedUrlInput.value.trim() : '';
-        if (url) {
-            return NfcNtag.calculateDualRecordSize(vcardData, url);
+    /** Build the Flipper .nfc file text for the current card and settings. */
+    function buildNfcFile() {
+        const tag = new NfcNtag(state.ntag);
+        const url = hostedUrlInput.value.trim();
+        if (state.compat === 'dual' && url) {
+            tag.generateDualRecordBusinessCard(state.lastSerialized, url);
         } else {
-            return NfcNtag.calculateSingleRecordSize(vcardData);
+            tag.generateVcardTag(state.lastSerialized);
         }
+        return tag.exportData();
     }
 
-    function updateCapacityDisplay() {
-        const tagType = getSelectedNfcTagType();
-        if (tagType === 'VCARD_EDIT') {
-            if (generateButton) {
-                generateButton.textContent = 'Download .vcf';
-                generateButton.disabled = false;
-            }
-            capacityWarning.style.display = 'none';
-            return;
-        }
-
-        const config = NTAG_CONFIG[tagType];
-        if (!config) return;
-
-        const maxCapacity = config.ndefCapacity;
-        const currentBytes = measureCurrentPayloadSize();
-        if (currentBytes === 0) {
-            globalCapacityBar.style.width = `0%`;
-            globalCapacityText.textContent = `0 / ${maxCapacity} bytes`;
-            generateButton.disabled = false;
-            generateButton.textContent = 'Generate NFC Tag';
-            return;
-        }
-
-        const percentage = Math.min((currentBytes / maxCapacity) * 100, 100);
-        const fits = currentBytes <= maxCapacity;
-
-        globalCapacityBar.style.width = `${percentage}%`;
-        globalCapacityBar.className = 'capacity-bar-fill' + (fits ? '' : ' over-capacity');
-        globalCapacityText.textContent = `${currentBytes} / ${maxCapacity} bytes${fits ? '' : ' — TOO LARGE'}`;
-
-        capacityWarning.textContent = '';
-        capacityWarning.style.display = 'none';
-
-        if (!fits) {
-            generateButton.disabled = true;
-            generateButton.textContent = 'Data too large for Tag';
-
-            if (tagType === 'NTAG213' && currentBytes <= NTAG_CONFIG['NTAG215'].ndefCapacity) {
-                capacityWarning.textContent = 'Size exceeded. Suggest switching to 215.';
-                capacityWarning.style.display = 'block';
-            } else if (tagType === 'NTAG215' && currentBytes <= NTAG_CONFIG['NTAG216'].ndefCapacity) {
-                capacityWarning.textContent = 'Size exceeded. Suggest switching to 216.';
-                capacityWarning.style.display = 'block';
-            }
-            globalCapacityText.parentNode.classList.add('has-warning');
-        } else {
-            generateButton.disabled = false;
-            generateButton.textContent = 'Generate NFC Tag';
-            globalCapacityText.parentNode.classList.remove('has-warning');
-        }
-    }
-
-    document.querySelectorAll('input, select, textarea').forEach(el => {
-        el.addEventListener('input', updateCapacityDisplay);
+    downloadVcfBtn.addEventListener('click', () => {
+        downloadFile(`${exportFilename()}.vcf`, state.lastSerialized, 'text/vcard');
     });
 
-    // Helper functions for vCard rendering
-    vcardModeRadios.forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            activeVcardMode = e.target.value;
-            Object.values(vcardModePanels).forEach(panel => panel.classList.add('hidden'));
-            if (vcardModePanels[activeVcardMode]) {
-                vcardModePanels[activeVcardMode].classList.remove('hidden');
-            }
-            if (activeVcardMode !== 'scratch') {
-                vcardModePanels['scratch'].classList.remove('hidden');
-            }
-            updateCapacityDisplay();
-        });
-    });
-
-    // Validation helpers
-    const VALIDATORS = {
-        email: (v) => {
-            if (!v) return null;
-            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : 'Invalid email format';
-        },
-        url: (v) => {
-            if (!v) return null;
-            try { new URL(v); return null; } catch { return 'Invalid URL format'; }
-        },
-        uri: (v) => {
-            if (!v) return null;
-            return /^[a-zA-Z][a-zA-Z0-9+.-]*:.+$/.test(v) ? null : 'Invalid URI (e.g. xmpp:user@example.com)';
-        },
-        date: (v) => {
-            if (!v) return null;
-            // RFC 6350: date (YYYY-MM-DD, YYYYMMDD, --MM-DD, --MMDD)
-            // or date-time (YYYYMMDDTHHMMSS, YYYYMMDDTHHMMSSZ, YYYY-MM-DDTHH:MM:SS, YYYY-MM-DDTHH:MM:SSZ)
-            return /^(\d{4}-?\d{2}-?\d{2}(T\d{2}:?\d{2}:?\d{2}Z?)?|--\d{2}-?\d{2})$/.test(v) ? null : 'Use YYYY-MM-DD, YYYYMMDD, or with time: YYYYMMDDTHHMMSSZ';
-        },
-        gender: (v) => {
-            if (!v) return null;
-            // RFC 6350: single letter M/F/O/N/U, optionally followed by ;text
-            return /^[MFONU](;.*)?$/i.test(v) ? null : 'Use M, F, O, N, or U (optionally ;text)';
-        },
-        tel: (v) => {
-            if (!v) return null;
-            // Accept tel: URI format (RFC 3966) or plain phone number
-            const num = v.replace(/^tel:/i, '');
-            return /^[+]?[\d\s()\[\]\-./]+$/.test(num) ? null : 'Invalid characters in phone number';
-        }
-    };
-
-    const VCARD_FIELDS = [
-        // Basic Identity
-        { key: 'FN', label: 'Full Name', type: 'text', multi: false },
-        { key: 'N', label: 'Name Parts (Family;Given;...)', type: 'text', multi: false },
-        { key: 'NICKNAME', label: 'Nickname', type: 'text', multi: true },
-        { key: 'ORG', label: 'Organization', type: 'text', multi: false },
-        { key: 'TITLE', label: 'Job Title', type: 'text', multi: false },
-        { key: 'ROLE', label: 'Role', type: 'text', multi: false },
-        // Contact Details
-        { key: 'TEL', label: 'Phone', type: 'tel', multi: true, params: ['CELL', 'WORK', 'HOME', 'VOICE', 'FAX', 'VIDEO', 'PAGER', 'TEXT', 'TEXTPHONE'], validate: VALIDATORS.tel },
-        { key: 'EMAIL', label: 'Email', type: 'email', multi: true, params: ['WORK', 'HOME'], validate: VALIDATORS.email },
-        { key: 'IMPP', label: 'Instant Messaging', type: 'url', multi: true, params: ['WORK', 'HOME'], validate: VALIDATORS.uri },
-        { key: 'URL', label: 'Website', type: 'url', multi: true, params: ['WORK', 'HOME'], validate: VALIDATORS.url },
-        { key: 'ADR', label: 'Address (PO;Ext;Street;City;State;ZIP;Country)', type: 'text', multi: true, params: ['HOME', 'WORK'] },
-        // Dates & Personal
-        { key: 'BDAY', label: 'Birthday', type: 'text', multi: false, validate: VALIDATORS.date },
-        { key: 'ANNIVERSARY', label: 'Anniversary', type: 'text', multi: false, validate: VALIDATORS.date },
-        { key: 'GENDER', label: 'Gender (M/F/O/N/U)', type: 'text', multi: false, validate: VALIDATORS.gender },
-        // Metadata
-        { key: 'CATEGORIES', label: 'Categories / Tags', type: 'text', multi: true },
-        { key: 'NOTE', label: 'Notes', type: 'text', multi: false }
-    ];
-
-    // Keys handled by VCARD_FIELDS (plus VERSION which is handled separately)
-    const KNOWN_KEYS = new Set(VCARD_FIELDS.map(f => f.key).concat(['VERSION']));
-
-    function renderVcardEditor() {
-        vcardSectionsContainer.innerHTML = '';
-        VCARD_FIELDS.forEach(fieldDef => {
-            const section = document.createElement('div');
-            section.className = 'vcard-section';
-
-            const title = document.createElement('div');
-            title.className = 'vcard-section-title';
-            title.textContent = fieldDef.label;
-            section.appendChild(title);
-
-            const props = currentVcardProps.filter(p => p.key === fieldDef.key);
-            if (props.length === 0 && !fieldDef.multi) {
-                props.push({ key: fieldDef.key, param: '', value: '' });
-                currentVcardProps.push(props[0]); // Make sure it's in the main array
-            }
-
-            const rowsContainer = document.createElement('div');
-            rowsContainer.className = 'vcard-rows-container';
-            props.forEach(prop => rowsContainer.appendChild(createVcardPropRow(fieldDef, prop)));
-            section.appendChild(rowsContainer);
-
-            if (fieldDef.multi) {
-                const addBtn = document.createElement('button');
-                addBtn.type = 'button';
-                addBtn.className = 'btn-add-prop';
-                addBtn.textContent = `+ Add ${fieldDef.label}`;
-                addBtn.onclick = () => {
-                    const newProp = { key: fieldDef.key, param: fieldDef.params ? fieldDef.params[0] : '', value: '' };
-                    currentVcardProps.push(newProp);
-                    rowsContainer.appendChild(createVcardPropRow(fieldDef, newProp));
-                    updateCapacityDisplay();
-                };
-                section.appendChild(addBtn);
-            }
-            vcardSectionsContainer.appendChild(section);
-        });
-
-        // Passthrough section for unrecognized/complex properties
-        const passthroughProps = currentVcardProps.filter(p => !KNOWN_KEYS.has(p.key));
-        if (passthroughProps.length > 0) {
-            const section = document.createElement('div');
-            section.className = 'vcard-section';
-
-            const title = document.createElement('div');
-            title.className = 'vcard-section-title';
-            title.textContent = 'Other Imported Properties';
-            section.appendChild(title);
-
-            const hint = document.createElement('p');
-            hint.className = 'field-hint passthrough-hint';
-            hint.textContent = 'These properties were imported but cannot be edited in this version. They will be included in exports. Unverified \u2014 check manually.';
-            section.appendChild(hint);
-
-            const rowsContainer = document.createElement('div');
-            rowsContainer.className = 'vcard-rows-container';
-            passthroughProps.forEach(prop => {
-                const row = document.createElement('div');
-                row.className = 'vcard-prop-row prop-readonly';
-                if (prop._changed) row.classList.add('prop-changed');
-
-                const keyLabel = document.createElement('span');
-                keyLabel.className = 'prop-key-label';
-                keyLabel.textContent = prop.key;
-                row.appendChild(keyLabel);
-
-                const valueDisplay = document.createElement('div');
-                valueDisplay.className = 'input-group';
-                const textarea = document.createElement('textarea');
-                textarea.value = prop.value;
-                textarea.readOnly = true;
-                textarea.rows = 1;
-                textarea.className = 'readonly-value';
-                valueDisplay.appendChild(textarea);
-                row.appendChild(valueDisplay);
-
-                const delBtn = document.createElement('button');
-                delBtn.type = 'button';
-                delBtn.className = 'btn-icon';
-                delBtn.innerHTML = '&times;';
-                delBtn.onclick = () => {
-                    const idx = currentVcardProps.indexOf(prop);
-                    if (idx > -1) currentVcardProps.splice(idx, 1);
-                    row.remove();
-                    updateCapacityDisplay();
-                };
-                row.appendChild(delBtn);
-
-                rowsContainer.appendChild(row);
-            });
-            section.appendChild(rowsContainer);
-            vcardSectionsContainer.appendChild(section);
-        }
-    }
-
-    function createVcardPropRow(fieldDef, propRef) {
-        const row = document.createElement('div');
-        row.className = 'vcard-prop-row';
-        if (propRef._changed) {
-            row.classList.add('prop-changed');
-        }
-
-        if (fieldDef.params && fieldDef.params.length > 0) {
-            const select = document.createElement('select');
-            select.className = 'prop-type-select';
-            select.multiple = true;
-            select.size = Math.min(3, fieldDef.params.length + 1);
-
-            let matchFound = false;
-            fieldDef.params.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p;
-                opt.textContent = p;
-                if (propRef.param && propRef.param.toUpperCase().split(',').includes(p.toUpperCase())) {
-                    opt.selected = true;
-                    matchFound = true;
-                }
-                select.appendChild(opt);
-            });
-
-            if (propRef.param && !matchFound) {
-                const customOpt = document.createElement('option');
-                customOpt.value = propRef.param;
-                customOpt.textContent = propRef.param;
-                customOpt.selected = true;
-                select.appendChild(customOpt);
-            }
-
-            select.onchange = (e) => {
-                const selectedOptions = Array.from(e.target.selectedOptions).map(o => o.value);
-                propRef.param = selectedOptions.join(',');
-                updateCapacityDisplay();
-            };
-            row.appendChild(select);
-        }
-
-        const inputGroup = document.createElement('div');
-        inputGroup.className = 'input-group';
-        const input = document.createElement(fieldDef.key === 'NOTE' ? 'textarea' : 'input');
-        if (input.tagName === 'INPUT') input.type = fieldDef.type;
-        input.value = propRef.value;
-        input.placeholder = `Enter ${fieldDef.label}`;
-
-        // Inline validation
-        const validateAndMark = () => {
-            if (fieldDef.validate && input.value.trim()) {
-                const err = fieldDef.validate(input.value.trim());
-                let errEl = inputGroup.querySelector('.prop-validation-error');
-                if (err) {
-                    input.classList.add('input-invalid');
-                    propRef._invalid = true;
-                    if (!errEl) {
-                        errEl = document.createElement('div');
-                        errEl.className = 'prop-validation-error';
-                        inputGroup.appendChild(errEl);
-                    }
-                    errEl.textContent = err;
-                } else {
-                    input.classList.remove('input-invalid');
-                    delete propRef._invalid;
-                    if (errEl) errEl.remove();
-                }
-            } else {
-                input.classList.remove('input-invalid');
-                delete propRef._invalid;
-                const errEl = inputGroup.querySelector('.prop-validation-error');
-                if (errEl) errEl.remove();
-            }
-        };
-
-        input.oninput = (e) => {
-            propRef.value = e.target.value;
-            validateAndMark();
-            updateCapacityDisplay();
-        };
-
-        // Validate on initial render if value exists
-        inputGroup.appendChild(input);
-        if (propRef.value.trim()) validateAndMark();
-        row.appendChild(inputGroup);
-
-        if (fieldDef.multi) {
-            const delBtn = document.createElement('button');
-            delBtn.type = 'button';
-            delBtn.className = 'btn-icon';
-            delBtn.innerHTML = '&times;';
-            delBtn.onclick = () => {
-                const idx = currentVcardProps.indexOf(propRef);
-                if (idx > -1) currentVcardProps.splice(idx, 1);
-                row.remove();
-                updateCapacityDisplay();
-            };
-            row.appendChild(delBtn);
-        }
-        return row;
-    }
-
-    function generateVcardStringFromEditor() {
-        const version = vcardVersionSelect.value || '4.0';
-        let lines = ['BEGIN:VCARD', `VERSION:${version}`];
-
-        // Helper to build a param string for a prop
-        function buildParamStr(p) {
-            let paramStr = '';
-            if (p.param) {
-                const paramList = p.param.toUpperCase().replace(/\s/g, '').split(',').filter(Boolean);
-                if (version === '4.0' || version === '3.0') {
-                    paramStr = `;TYPE=${paramList.join(',')}`;
-                } else {
-                    paramStr = ';' + paramList.join(';');
-                }
-            }
-            if (p.rawOtherParams && p.rawOtherParams.length > 0) {
-                paramStr += ';' + p.rawOtherParams.join(';');
-            }
-            return paramStr;
-        }
-
-        // Emit known fields in order
-        VCARD_FIELDS.forEach(fieldDef => {
-            currentVcardProps.filter(p => p.key === fieldDef.key).forEach(p => {
-                if (!p.value.trim()) return;
-                lines.push(`${fieldDef.key}${buildParamStr(p)}:${p.value.trim()}`);
-            });
-        });
-
-        // Emit passthrough (unknown) fields
-        currentVcardProps.filter(p => !KNOWN_KEYS.has(p.key)).forEach(p => {
-            if (!p.value.trim()) return;
-            let paramStr = '';
-            if (p.param) paramStr = `;${p.param}`;
-            if (p.rawOtherParams && p.rawOtherParams.length > 0) {
-                paramStr += ';' + p.rawOtherParams.join(';');
-            }
-            lines.push(`${p.key}${paramStr}:${p.value.trim()}`);
-        });
-
-        lines.push('END:VCARD');
-        return lines.join('\r\n');
-    }
-
-    vcardFetchButton.addEventListener('click', async () => {
-        const url = vcardHostedUrlInput.value.trim();
-        if (!url) return formatInlineError(vcardHostedUrlInput, 'Enter a URL first');
-        vcardHostedUrlInput.style.borderColor = '';
-        const errDiv = vcardHostedUrlInput.parentElement.querySelector('.input-error');
-        if (errDiv) errDiv.remove();
-
+    copyVcfBtn.addEventListener('click', async () => {
         try {
-            vcardFetchButton.textContent = '...';
-            const res = await fetch(url);
-            if (!res.ok) throw new Error('Failed to fetch from URL');
-            loadVcardDataIntoEditor(await res.text());
+            await navigator.clipboard.writeText(state.lastSerialized);
+            copyVcfBtn.textContent = 'Copied!';
         } catch (e) {
-            alert('Failed to fetch (likely CORS blocking). The file will be opened for download. Please copy its contents and paste them manually.');
-            window.open(url, '_blank');
-            document.getElementById('mode_paste').click();
-        } finally {
-            vcardFetchButton.textContent = 'Fetch & Load';
+            copyVcfBtn.textContent = 'Copy failed';
+        }
+        setTimeout(() => { copyVcfBtn.textContent = 'Copy'; }, 1500);
+    });
+
+    downloadNfcBtn.addEventListener('click', () => {
+        try {
+            downloadFile(`${exportFilename()}.nfc`, buildNfcFile(), 'application/octet-stream');
+        } catch (err) {
+            capacityWarning.textContent = err.message;
         }
     });
 
-    vcardProcessPasteBtn.addEventListener('click', () => {
-        const data = vcardPasteTextarea.value.trim();
-        if (data) loadVcardDataIntoEditor(data);
-    });
-
-    function loadVcardDataIntoEditor(rawVcard) {
-        if (typeof parseVCard === 'function') {
-            try {
-                const parsed = parseVCard(rawVcard);
-                currentVcardPropsHistory = JSON.parse(JSON.stringify(currentVcardProps));
-                vcardUndoBtn.classList.remove('hidden');
-
-                currentVcardProps = [];
-                if (parsed.version) vcardVersionSelect.value = parsed.version;
-
-                Object.keys(parsed).forEach(key => {
-                    if (key === 'version') return;
-                    const vals = Array.isArray(parsed[key]) ? parsed[key] : [parsed[key]];
-                    vals.forEach(v => {
-                        let param = '', value = v;
-                        if (typeof v === 'object' && v !== null) {
-                            param = v.type || '';
-                            value = v.value || '';
-                            rawOtherParams = v.rawOtherParams || [];
-                        }
-                        currentVcardProps.push({ key: key.toUpperCase(), param, value, rawOtherParams });
-                    });
-                });
-                renderVcardEditor();
-                updateCapacityDisplay();
-            } catch (e) {
-                alert('Invalid vCard data!');
-            }
-        }
-    }
-
-    vcardCompatRadios.forEach(radio => {
-        radio.addEventListener('change', () => {
-            if (radio.value === 'dual') {
-                vcardUrlGroup.style.display = 'block';
-            } else {
-                vcardUrlGroup.style.display = 'none';
-            }
-            updateCapacityDisplay();
-        });
-    });
-
-    vcardVersionSelect.addEventListener('change', () => {
-        if (vcardCheckStatus) {
-            vcardCheckStatus.textContent = '⏳';
-            setTimeout(() => {
-                vcardCheckStatus.textContent = '✅';
-                setTimeout(() => { vcardCheckStatus.textContent = ''; }, 2000);
-            }, 600);
-        }
-    });
-
-    if (downloadVcfBtn) {
-        downloadVcfBtn.addEventListener('click', () => {
-            const invalidProp = currentVcardProps.find(p => p._invalid);
-            if (invalidProp) {
-                const invalidInput = vcardSectionsContainer.querySelector('.input-invalid');
-                if (invalidInput) {
-                    invalidInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    invalidInput.focus();
-                }
-                return;
-            }
-            const vcardStr = generateVcardStringFromEditor();
-            downloadNFCFile(vcardStr, generateFilename('Contact'), '.vcf');
-        });
-    }
-
-    if (vcardClearBtn) {
-        vcardClearBtn.addEventListener('click', () => {
-            currentVcardPropsHistory = JSON.parse(JSON.stringify(currentVcardProps));
-            currentVcardProps = [];
-            renderVcardEditor();
-            updateCapacityDisplay();
-            vcardUndoBtn.classList.remove('hidden');
-        });
-    }
-
-    if (vcardUndoBtn) {
-        vcardUndoBtn.addEventListener('click', () => {
-            if (currentVcardPropsHistory) {
-                currentVcardProps = JSON.parse(JSON.stringify(currentVcardPropsHistory));
-                currentVcardPropsHistory = null;
-                renderVcardEditor();
-                updateCapacityDisplay();
-                vcardUndoBtn.classList.add('hidden');
-            }
-        });
-    }
-
-    vcardOptimizeBtn.addEventListener('click', runSizeOptimization);
-
-    function runSizeOptimization() {
-        if (typeof optimizeVCardProps === 'function') {
-            const before = JSON.parse(JSON.stringify(currentVcardProps));
-            currentVcardPropsHistory = before;
-            vcardUndoBtn.classList.remove('hidden');
-
-            currentVcardProps = optimizeVCardProps(currentVcardProps, vcardVersionSelect.value);
-
-            // Mark changed fields for visual highlighting
-            currentVcardProps.forEach((p, i) => {
-                if (i < before.length) {
-                    if (p.value !== before[i].value || p.param !== before[i].param) {
-                        p._changed = true;
-                    }
-                }
-            });
-
-            renderVcardEditor();
-            updateCapacityDisplay();
-        }
-    }
-
-    /* ========================================================================
-     * SECTION: WebSerial — Send to Flipper
-     * ===================================================================== */
-
-    /**
-     * Show a modal dialog.
-     * @param {string} modalId - The modal element ID.
-     */
-    function showModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) modal.classList.add('active');
-    }
-
-    /**
-     * Send the generated NFC data to a connected Flipper Zero via WebSerial.
-     */
-    async function sendToFlipper() {
+    sendFlipperBtn.addEventListener('click', async () => {
         if (!navigator.serial || /Mobi|Android/i.test(navigator.userAgent)) {
-            showModal('webSerialModal');
+            $('webSerialModal').classList.add('active');
             return;
         }
-
-        const nfcData = document.getElementById('nfcData').textContent;
-        const filename = generateFilename();
-        const sendButton = document.querySelector('#sendToFlipperButton');
-        const statusDiv = document.createElement('div');
-        statusDiv.className = 'send-status';
-        sendButton.parentNode.appendChild(statusDiv);
-
         try {
-            sendButton.disabled = true;
-            sendButton.classList.add('sending');
-
-            if (!flipperSerial) {
-                flipperSerial = new FlipperSerial();
-            }
-
+            sendFlipperBtn.disabled = true;
+            flipperStatus.className = 'send-status';
+            const nfcData = buildNfcFile();
+            if (!flipperSerial) flipperSerial = new FlipperSerial();
             if (!flipperSerial.isConnected) {
-                statusDiv.textContent = 'Connecting to Flipper...';
+                flipperStatus.textContent = 'Connecting to Flipper…';
                 await flipperSerial.connect();
             }
-
-            statusDiv.textContent = 'Creating directory...';
+            flipperStatus.textContent = 'Sending…';
             await flipperSerial.writeCommand('storage mkdir /ext/nfc');
-
-            statusDiv.textContent = 'Sending to Flipper...';
-            await flipperSerial.writeFile(`/ext/nfc/${filename}.nfc`, nfcData);
-
-            statusDiv.textContent = 'Successfully sent to Flipper!';
-            statusDiv.classList.add('success');
-
-            setTimeout(() => {
-                statusDiv.remove();
-                sendButton.classList.remove('sending');
-                sendButton.disabled = false;
-            }, 3000);
-
-        } catch (error) {
-            console.error('Error sending to Flipper:', error);
-            statusDiv.textContent = `Error: ${error.message}. Please try again.`;
-            statusDiv.classList.add('error');
+            await flipperSerial.writeFile(`/ext/nfc/${exportFilename()}.nfc`, nfcData);
+            flipperStatus.textContent = `Saved to Flipper as /ext/nfc/${exportFilename()}.nfc`;
+            flipperStatus.classList.add('success');
+        } catch (err) {
+            console.error('Flipper transfer failed:', err);
+            flipperStatus.textContent = `Error: ${err.message}`;
+            flipperStatus.classList.add('error');
             flipperSerial = null;
-            sendButton.classList.remove('sending');
-            sendButton.disabled = false;
+        } finally {
+            sendFlipperBtn.disabled = false;
         }
-    }
-
-    // Initialise UI
-    renderVcardEditor();
-    nfcTagTypeRadios.forEach(radio => radio.addEventListener('change', handleTagTypeChange));
-    tagTypeSelect.addEventListener('change', showRelevantInputs);
-    generateButton.addEventListener('click', generateNFCData);
-
-    if (downloadButton) {
-        downloadButton.addEventListener('click', () => downloadNFCFile());
-    }
-
-    // Modal close buttons
-    document.querySelectorAll('.modal-close').forEach(button => {
-        button.addEventListener('click', () => {
-            const modal = button.closest('.modal-overlay');
-            if (modal) modal.classList.remove('active');
-        });
     });
 
-    // Initialise input visibility
-    showRelevantInputs();
+    /* --- Import panels --- */
+
+    const pastePanel = $('pastePanel');
+    const urlPanel = $('urlPanel');
+
+    $('importPasteBtn').addEventListener('click', () => {
+        pastePanel.classList.toggle('hidden');
+        urlPanel.classList.add('hidden');
+    });
+    $('importUrlBtn').addEventListener('click', () => {
+        urlPanel.classList.toggle('hidden');
+        pastePanel.classList.add('hidden');
+    });
+    document.querySelectorAll('.panel-close').forEach(btn =>
+        btn.addEventListener('click', () => btn.closest('.import-panel').classList.add('hidden')));
+
+    $('pasteLoadBtn').addEventListener('click', () => {
+        const text = $('pasteTextarea').value.trim();
+        if (!text) return;
+        try {
+            loadModel(parseVCard(text));
+            pastePanel.classList.add('hidden');
+        } catch (err) {
+            alert(err.message);
+        }
+    });
+
+    $('importFileBtn').addEventListener('click', () => $('importFileInput').click());
+    $('importFileInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            try {
+                loadModel(parseVCard(String(reader.result)));
+            } catch (err) {
+                alert(err.message);
+            }
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+    });
+
+    $('urlFetchBtn').addEventListener('click', async () => {
+        const url = $('urlFetchInput').value.trim();
+        if (!url) return;
+        const btn = $('urlFetchBtn');
+        btn.textContent = '…';
+        try {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            loadModel(parseVCard(await res.text()));
+            urlPanel.classList.add('hidden');
+        } catch (err) {
+            alert('Fetch failed (likely CORS). The file will open in a new tab — copy its contents and use Paste.');
+            window.open(url, '_blank');
+            urlPanel.classList.add('hidden');
+            pastePanel.classList.remove('hidden');
+        } finally {
+            btn.textContent = 'Fetch';
+        }
+    });
+
+    $('clearBtn').addEventListener('click', () => {
+        state.model = { version: state.version, properties: [], warnings: [] };
+        state.parseWarnings = [];
+        renderEditor();
+        refreshOutput();
+    });
+
+    /* ========================================================================
+     * SECTION: Toolbar radio groups & theme
+     * ===================================================================== */
+
+    document.querySelectorAll('input[name="vcardVersion"]').forEach(radio =>
+        radio.addEventListener('change', () => {
+            state.version = radio.value;
+            renderEditor();
+            refreshOutput();
+        }));
+    document.querySelectorAll('input[name="ntagType"]').forEach(radio =>
+        radio.addEventListener('change', () => { state.ntag = radio.value; refreshOutput(); }));
+    document.querySelectorAll('input[name="compatMode"]').forEach(radio =>
+        radio.addEventListener('change', () => { state.compat = radio.value; refreshOutput(); }));
+    hostedUrlInput.addEventListener('input', refreshOutput);
+
+    document.querySelectorAll('.modal-close').forEach(btn =>
+        btn.addEventListener('click', () => btn.closest('.modal-overlay').classList.remove('active')));
+
+    const themeToggle = $('themeToggle');
+
+    /** Sync the theme toggle glyph with the active theme. */
+    function updateThemeToggle() {
+        const current = document.documentElement.getAttribute('data-theme') || 'dark';
+        themeToggle.textContent = current === 'dark' ? '☀️' : '🌙';
+    }
+
+    /** Apply saved theme > system preference > dark default. */
+    function initTheme() {
+        const saved = localStorage.getItem('theme');
+        if (saved) {
+            document.documentElement.setAttribute('data-theme', saved);
+        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+            document.documentElement.setAttribute('data-theme', 'light');
+        } else {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+        updateThemeToggle();
+    }
+
+    themeToggle.addEventListener('click', () => {
+        const next = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+        updateThemeToggle();
+    });
+
+    if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+            if (!localStorage.getItem('theme')) {
+                document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+                updateThemeToggle();
+            }
+        });
+    }
+
+    /* ========================================================================
+     * SECTION: Init
+     * ===================================================================== */
+
+    initTheme();
+    renderEditor();
+    refreshOutput();
 });

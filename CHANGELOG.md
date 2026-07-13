@@ -42,6 +42,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - TODO comments for future feature roadmap
 
 ### Changed
+- **Transformed the app into VCF Pro** — a professional vCard editor with
+  Flipper `.nfc` export. The single-page workspace now has a grouped property
+  editor (identity, organization, phones, email/IM/web, addresses, dates &
+  personal, notes & metadata, imported passthrough) on the left and a sticky
+  live pane on the right with highlighted serialized source, per-version
+  validation diagnostics, byte counter, and a Flipper NFC export card
+  (NTAG 213/215/216 capacity bar, iOS+Android dual-record mode, WebSerial send)
+- Version switching (2.1 / 3.0 / 4.0) converts losslessly from one master
+  model, hides fields that don't exist in the target version, and reports
+  anything that would be dropped on export
 - **Visual refresh**: new navy + teal colour scheme replacing original orange
 - Layout overhaul replacing vertical stacking with space-efficient "Options Grid"
 - Consolidated the iOS dedicated form into the core Contact tagging flow

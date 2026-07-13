@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
-  Flipper NFC Maker Plus
-  A fork of Flipper-NFC-Maker by jaylikesbunda.
+  VCF Pro — vCard Studio for Flipper
+  A fork of Flipper-NFC-Maker by jaylikesbunda, transformed into a
+  professional vCard editor with Flipper Zero .nfc export.
 
   Original work Copyright (c) jaylikesbunda
   Modifications Copyright (c) PBNZ 2026
@@ -14,11 +15,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flipper NFC Maker Plus — NFC Tag Generator</title>
+    <title>VCF Pro — vCard Editor &amp; Flipper NFC Export</title>
     <meta name="description"
-        content="Generate Flipper Zero .nfc tag files for URLs, contacts, Wi-Fi, business cards, and more. Supports NTAG213, NTAG215, and NTAG216.">
+        content="Professional vCard (.vcf) editor and creator for vCard 2.1, 3.0, and 4.0 with RFC-compliant output, plus Flipper Zero .nfc contact tag export.">
     <link rel="icon" type="image/svg+xml"
-        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230a1628'/%3E%3Cpath d='M32 44a12 12 0 1 1 0-24' fill='none' stroke='%2300b8a9' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M32 38a6 6 0 1 1 0-12' fill='none' stroke='%2300b8a9' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='32' cy='32' r='2.5' fill='%2300b8a9'/%3E%3C/svg%3E">
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230a1628'/%3E%3Cpath d='M20 18h24M20 28h24M20 38h14' stroke='%2300b8a9' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='44' cy='42' r='7' fill='none' stroke='%2300b8a9' stroke-width='3.5'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="css/styles.css">
     <!-- GOOGLE_ANALYTICS_PLACEHOLDER -->
 </head>
@@ -26,281 +27,144 @@
 <body>
     <canvas id="bgCanvas"></canvas>
 
-    <div class="container">
+    <div class="app-shell">
         <!-- ============================================================
-             HEADER / BRANDING
+             HEADER
              ============================================================ -->
         <header class="app-header">
-            <h1 class="app-title">Flipper NFC Maker Plus</h1>
-            <p class="app-subtitle">
-                NFC tag generator for Flipper Zero by <a href="https://github.com/PBNZ/Flipper-NFC-Maker-Plus"
-                    target="_blank" rel="noopener">PBNZ</a> &mdash;
-                forked from <a href="https://github.com/jaylikesbunda/Flipper-NFC-Maker" target="_blank"
-                    rel="noopener">jaylikesbunda/Flipper-NFC-Maker</a>
-            </p>
+            <div class="brand">
+                <h1 class="app-title">VCF Pro</h1>
+                <p class="app-subtitle">RFC-compliant vCard editor &middot; 2.1 / 3.0 / 4.0 &middot; Flipper Zero
+                    <code>.nfc</code> export</p>
+            </div>
+            <div class="header-actions">
+                <button id="themeToggle" class="theme-toggle" title="Toggle colour theme">☀️</button>
+            </div>
         </header>
 
         <!-- ============================================================
-             MAIN CONTENT
+             WORKSPACE: editor (left) + live output (right)
              ============================================================ -->
-        <main>
-            <!-- Unified Options Grid: Record Type & Tag Type side-by-side on desktop -->
-            <div class="options-grid">
-                <!-- Record/Content Type Selection -->
-                <div class="input-group">
-                    <label for="tagType">Record Type</label>
-                    <select id="tagType">
-                        <option value="Contact">Contact (vCard) [iOS+Android, Android] ✨</option>
-                        <option value="URL">URL [iOS, Android]</option>
-                        <option value="Text">Plain Text [Android]</option>
-                        <option value="Phone">Phone Number [iOS, Android]</option>
-                        <option value="Email">Email [iOS, Android]</option>
-                        <option value="WiFi">Wi-Fi Configuration [Android]</option>
-                        <option value="Geo">Geo Location [iOS, Android]</option>
-                        <option value="SMS">SMS Message [iOS, Android]</option>
-                        <option value="LaunchApp">Launch Application [Android]</option>
-                        <option value="CustomMIME">Custom MIME Type [Android]</option>
-                        <option value="SocialMedia">Social Media Link [iOS, Android]</option>
-                        <option value="FaceTime">FaceTime [iOS]</option>
-                        <option value="FaceTimeAudio">FaceTime Audio [iOS]</option>
-                        <option value="AppleMaps">Apple Maps [iOS]</option>
-                        <option value="HomeKit">HomeKit Setup [iOS]</option>
-                    </select>
-                </div>
-
-                <!-- NFC Tag Type (NTAG chip) Selection -->
-                <div class="input-group">
-                    <label>NFC Tag Type</label>
-                    <div class="segmented-control" id="nfcTagTypeGroup">
-                        <input type="radio" name="nfcTagType" id="tag_213" value="NTAG213">
-                        <label for="tag_213">213</label>
-
-                        <input type="radio" name="nfcTagType" id="tag_215" value="NTAG215">
-                        <label for="tag_215">215</label>
-
-                        <input type="radio" name="nfcTagType" id="tag_216" value="NTAG216" checked>
-                        <label for="tag_216">216</label>
-
-                        <input type="radio" name="nfcTagType" id="tag_vcard_edit" value="VCARD_EDIT">
-                        <label for="tag_vcard_edit" title="vCard edit only">n/a</label>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Global Capacity Bar -->
-            <div class="capacity-section" id="globalCapacitySection" style="display: none;">
-                <div class="capacity-bar-container">
-                    <div id="globalCapacityBar" class="capacity-bar-fill"></div>
-                </div>
-                <div class="capacity-footer-text">
-                    <span id="capacityWarning" class="capacity-warning"></span>
-                    <span id="globalCapacityText" class="capacity-text">0 / 888 bytes</span>
-                </div>
-            </div>
-
-            <!-- ========================================================
-                 DYNAMIC INPUT FIELDS (standard tag types)
-                 ======================================================== -->
-            <div id="inputFields">
-                <!-- FaceTime -->
-                <div class="input-group data-field" data-type="FaceTime FaceTimeAudio">
-                    <label for="facetimeInput">User Identifier (Email or Phone)</label>
-                    <input id="facetimeInput" type="text" placeholder="user@example.com">
-                </div>
-
-                <!-- Apple Maps -->
-                <div class="input-group data-field" data-type="AppleMaps">
-                    <label for="addressInput">Address</label>
-                    <input id="addressInput" type="text" placeholder="Apple Park, Cupertino, CA">
-                </div>
-
-                <!-- HomeKit -->
-                <div class="input-group data-field" data-type="HomeKit">
-                    <label for="homeKitCodeInput">HomeKit Code</label>
-                    <input id="homeKitCodeInput" type="text" placeholder="12345678">
-                </div>
-
-                <!-- URL -->
-                <div class="input-group data-field" data-type="URL SocialMedia">
-                    <label for="urlInput">URL</label>
-                    <input id="urlInput" type="text" placeholder="https://example.com">
-                </div>
-
-                <!-- Text -->
-                <div class="input-group data-field" data-type="Text">
-                    <label for="textInput">Text</label>
-                    <textarea id="textInput" placeholder="Enter your text here"></textarea>
-                </div>
-
-                <!-- Phone -->
-                <div class="input-group data-field" data-type="Phone">
-                    <label for="phoneInput">Phone Number</label>
-                    <input id="phoneInput" type="text" placeholder="+1234567890">
-                </div>
-
-                <!-- Email -->
-                <div class="input-group data-field" data-type="Email">
-                    <label for="emailInput">Email Address</label>
-                    <input id="emailInput" type="email" placeholder="example@example.com">
-                </div>
-
-                <!-- Wi-Fi -->
-                <div class="input-group data-field" data-type="WiFi">
-                    <label for="ssidInput">Wi-Fi SSID</label>
-                    <input id="ssidInput" type="text" placeholder="YourNetwork">
-                </div>
-                <div class="input-group data-field" data-type="WiFi">
-                    <label for="passwordInput">Wi-Fi Password</label>
-                    <input id="passwordInput" type="text" placeholder="YourPassword">
-                </div>
-                <div class="input-group data-field" data-type="WiFi">
-                    <label for="authTypeSelect">Authentication Type</label>
-                    <select id="authTypeSelect">
-                        <option value="WPA">WPA/WPA2</option>
-                        <option value="WEP">WEP</option>
-                        <option value="NONE">None</option>
-                    </select>
-                </div>
-
-                <!-- Contact (vCard) -->
-                <div class="input-group data-field vcard-wizard-container" data-type="Contact">
-                    <div class="vcard-compat-selector" id="vcardCompatContainer">
-                        <label>Compatibility</label>
-                        <div class="segmented-control mode-segment vcard-compat-segment">
-                            <input type="radio" name="vcardCompatMode" id="compat_dual" value="dual" checked>
-                            <label for="compat_dual">iOS + Android</label>
-
-                            <input type="radio" name="vcardCompatMode" id="compat_single" value="single">
-                            <label for="compat_single">Android Only</label>
+        <main class="workspace">
+            <section class="pane editor-pane" aria-label="vCard editor">
+                <div class="editor-toolbar card">
+                    <div class="toolbar-group">
+                        <label class="toolbar-label" for="versionSegment">Target version</label>
+                        <div class="segmented-control" id="versionSegment" role="group">
+                            <input type="radio" name="vcardVersion" id="ver_21" value="2.1">
+                            <label for="ver_21">2.1</label>
+                            <input type="radio" name="vcardVersion" id="ver_30" value="3.0">
+                            <label for="ver_30">3.0</label>
+                            <input type="radio" name="vcardVersion" id="ver_40" value="4.0" checked>
+                            <label for="ver_40">4.0</label>
                         </div>
                     </div>
-
-                    <div id="vcardUrlGroup" class="input-group ios-compat-group">
-                        <label for="vcardHostedUrlInput" class="ios-compat-label">Hosted VCF URL <span
-                                class="badge required-badge">Required</span></label>
-                        <div class="fetch-row">
-                            <input id="vcardHostedUrlInput" type="url" placeholder="https://example.com/contact.vcf">
-                            <button id="vcardFetchButton" class="btn btn-small"
-                                title="Fetch vCard data from this URL into the editor">Fetch &amp; Load</button>
-                        </div>
-                        <p class="field-hint">Required for iOS backwards compatibility. You can also fetch existing
-                            vCard data from this URL.</p>
+                    <div class="toolbar-group toolbar-actions">
+                        <button id="importPasteBtn" class="btn btn-small btn-secondary">Paste</button>
+                        <button id="importFileBtn" class="btn btn-small btn-secondary">Open file</button>
+                        <button id="importUrlBtn" class="btn btn-small btn-secondary">From URL</button>
+                        <button id="clearBtn" class="btn btn-small btn-ghost" title="Start a new empty contact">New</button>
+                        <input type="file" id="importFileInput" accept=".vcf,.vcard,text/vcard,text/x-vcard" hidden>
                     </div>
+                </div>
 
-                    <div class="vcard-wizard-mode-selector">
-                        <div class="segmented-control mode-segment">
-                            <input type="radio" name="vcardInputMode" id="mode_paste" value="paste">
-                            <label for="mode_paste">Paste pure vCard</label>
-
-                            <input type="radio" name="vcardInputMode" id="mode_scratch" value="scratch" checked>
-                            <label for="mode_scratch">Start Fresh / Editor</label>
-                        </div>
+                <!-- Import panels (collapsed by default) -->
+                <div id="pastePanel" class="card import-panel hidden">
+                    <label for="pasteTextarea">Paste raw vCard data</label>
+                    <textarea id="pasteTextarea" rows="6"
+                        placeholder="BEGIN:VCARD&#10;VERSION:4.0&#10;FN:Jane Doe&#10;...&#10;END:VCARD"></textarea>
+                    <div class="panel-actions">
+                        <button id="pasteLoadBtn" class="btn btn-small">Load into editor</button>
+                        <button class="btn btn-small btn-ghost panel-close">Cancel</button>
                     </div>
-
-                    <!-- Mode: Paste -->
-                    <div id="vcardModePaste" class="vcard-mode-panel hidden">
-                        <div class="input-group">
-                            <label for="vcardPasteTextarea">Raw vCard Data</label>
-                            <textarea id="vcardPasteTextarea"
-                                placeholder="BEGIN:VCARD&#10;VERSION:4.0&#10;...&#10;END:VCARD" rows="6"></textarea>
-                        </div>
-                        <button id="vcardProcessPasteBtn" class="btn btn-small">Load into Editor</button>
+                </div>
+                <div id="urlPanel" class="card import-panel hidden">
+                    <label for="urlFetchInput">Fetch a hosted .vcf</label>
+                    <div class="fetch-row">
+                        <input id="urlFetchInput" type="url" placeholder="https://example.com/contact.vcf">
+                        <button id="urlFetchBtn" class="btn btn-small">Fetch</button>
                     </div>
+                    <p class="field-hint">Cross-origin servers may block fetching; you'll be offered the file to paste
+                        instead.</p>
+                    <div class="panel-actions">
+                        <button class="btn btn-small btn-ghost panel-close">Cancel</button>
+                    </div>
+                </div>
 
-                    <!-- Mode: Scratch/Editor Form (RFC 6350) -->
-                    <div id="vcardEditorForm" class="vcard-editor-form">
-                        <div class="editor-header">
-                            <h3>vCard Editor (RFC 6350)</h3>
-                            <div class="editor-header-actions">
-                                <select id="vcardVersionSelect" class="version-select" aria-label="vCard Version">
-                                    <option value="4.0">vCard 4.0</option>
-                                    <option value="3.0">vCard 3.0</option>
-                                    <option value="2.1">vCard 2.1</option>
-                                </select>
-                                <span id="vcardCheckStatus" class="check-status"
-                                    style="width: 20px; display: inline-block;"></span>
-                                <button id="vcardOptimizeBtn" class="btn-tiny" title="Run size optimization pass">✨
-                                    Optimize</button>
-                                <button id="vcardUndoBtn" class="btn-tiny hidden"
-                                    title="Undo last optimization">Undo</button>
-                                <button id="vcardClearBtn" class="btn-tiny" title="Clear all fields">Clear All</button>
+                <!-- Dynamic editor sections rendered by app.js -->
+                <div id="editorSections"></div>
+            </section>
+
+            <section class="pane output-pane" aria-label="Live output">
+                <div class="card output-card">
+                    <div class="output-header">
+                        <h2>Live source</h2>
+                        <span id="byteCounter" class="byte-counter">0 bytes</span>
+                    </div>
+                    <pre id="sourcePreview" class="source-preview"></pre>
+                    <div id="validationPanel" class="validation-panel"></div>
+                    <div class="output-actions">
+                        <button id="downloadVcfBtn" class="btn btn-primary">Download .vcf</button>
+                        <button id="copyVcfBtn" class="btn btn-secondary" title="Copy source to clipboard">Copy</button>
+                    </div>
+                </div>
+
+                <div class="card nfc-card">
+                    <div class="output-header">
+                        <h2>Flipper NFC tag</h2>
+                        <span id="capacityText" class="byte-counter">&nbsp;</span>
+                    </div>
+                    <div class="nfc-controls">
+                        <div class="toolbar-group">
+                            <label class="toolbar-label">NTAG chip</label>
+                            <div class="segmented-control" role="group">
+                                <input type="radio" name="ntagType" id="ntag_213" value="NTAG213">
+                                <label for="ntag_213">213</label>
+                                <input type="radio" name="ntagType" id="ntag_215" value="NTAG215">
+                                <label for="ntag_215">215</label>
+                                <input type="radio" name="ntagType" id="ntag_216" value="NTAG216" checked>
+                                <label for="ntag_216">216</label>
                             </div>
                         </div>
-
-                        <div class="vcard-sections" id="vcardSectionsContainer">
-                            <!-- Dynamic UI rendered by vCard Builder -->
+                        <div class="toolbar-group">
+                            <label class="toolbar-label">Compatibility</label>
+                            <div class="segmented-control" role="group">
+                                <input type="radio" name="compatMode" id="compat_dual" value="dual" checked>
+                                <label for="compat_dual">iOS + Android</label>
+                                <input type="radio" name="compatMode" id="compat_single" value="single">
+                                <label for="compat_single">Android only</label>
+                            </div>
                         </div>
                     </div>
+                    <div class="input-group" id="hostedUrlGroup">
+                        <label for="hostedUrlInput">Hosted .vcf URL <span class="badge required-badge">required for
+                                iOS</span></label>
+                        <input id="hostedUrlInput" type="url" placeholder="https://example.com/contact.vcf">
+                        <p class="field-hint">iOS cannot read vCards straight from a tag; the second NDEF record points
+                            Safari at this hosted copy.</p>
+                    </div>
+                    <div class="capacity-bar-container">
+                        <div id="capacityBar" class="capacity-bar-fill"></div>
+                    </div>
+                    <p id="capacityWarning" class="capacity-warning"></p>
+                    <div class="output-actions">
+                        <button id="downloadNfcBtn" class="btn btn-primary">Download .nfc</button>
+                        <button id="sendFlipperBtn" class="btn btn-secondary">Send to Flipper</button>
+                    </div>
+                    <div id="flipperStatus" class="send-status"></div>
                 </div>
-
-                <!-- Geo Location -->
-                <div class="input-group data-field" data-type="Geo">
-                    <label for="latitudeInput">Latitude</label>
-                    <input id="latitudeInput" type="text" placeholder="37.7749">
-                </div>
-                <div class="input-group data-field" data-type="Geo">
-                    <label for="longitudeInput">Longitude</label>
-                    <input id="longitudeInput" type="text" placeholder="-122.4194">
-                </div>
-
-                <!-- SMS -->
-                <div class="input-group data-field" data-type="SMS">
-                    <label for="smsNumberInput">Phone Number</label>
-                    <input id="smsNumberInput" type="text" placeholder="+1234567890">
-                </div>
-                <div class="input-group data-field" data-type="SMS">
-                    <label for="smsBodyInput">Message Body</label>
-                    <textarea id="smsBodyInput" placeholder="Hello World"></textarea>
-                </div>
-
-                <!-- Launch Application -->
-                <div class="input-group data-field" data-type="LaunchApp">
-                    <label for="packageNameInput">Package Name</label>
-                    <input id="packageNameInput" type="text" placeholder="com.example.myapp">
-                </div>
-
-                <!-- Custom MIME -->
-                <div class="input-group data-field" data-type="CustomMIME">
-                    <label for="mimeTypeInput">MIME Type</label>
-                    <input id="mimeTypeInput" type="text" placeholder="application/myapp">
-                </div>
-                <div class="input-group data-field" data-type="CustomMIME">
-                    <label for="mimeDataInput">Data</label>
-                    <textarea id="mimeDataInput" placeholder="Your custom data here"></textarea>
-                </div>
-            </div>
-
-            <!-- Filename -->
-            <div class="input-group" id="filenameGroup">
-                <label for="filenameInput">Filename (optional)</label>
-                <input id="filenameInput" type="text" placeholder="nfc_filename">
-            </div>
-
-            <!-- Generate Actions -->
-            <div class="main-actions" style="display: flex; gap: 10px; margin-top: 1rem; margin-bottom: 20px;">
-                <button id="generateButton" class="btn" style="flex: 1;">Generate NFC Tag</button>
-                <button id="downloadVcfBtn" class="btn" style="display: none; flex: 1;"
-                    title="Download the raw vCard file directly">Download .vcf</button>
-            </div>
-
-
-            <!-- Standard Output -->
-            <div id="outputSection" class="hidden">
-                <h2>Generated NFC Tag Data</h2>
-                <pre id="nfcData"></pre>
-                <button id="downloadButton" class="btn">Download .nfc File</button>
-            </div>
+            </section>
         </main>
 
         <!-- ============================================================
              FOOTER
              ============================================================ -->
         <footer class="app-footer">
-            <button id="themeToggle" class="theme-toggle">☀️ Light Mode</button>
             <p class="footer-credit">
-                Flipper NFC Maker Plus by PBNZ &mdash;
-                <a href="https://github.com/jaylikesbunda/Flipper-NFC-Maker" target="_blank" rel="noopener">Original by
-                    jaylikesbunda</a>
+                VCF Pro by <a href="https://github.com/PBNZ/Flipper-NFC-Maker-Plus" target="_blank"
+                    rel="noopener">PBNZ</a> &mdash; forked from
+                <a href="https://github.com/jaylikesbunda/Flipper-NFC-Maker" target="_blank"
+                    rel="noopener">jaylikesbunda/Flipper-NFC-Maker</a>
                 &middot; Licensed under <a href="../LICENSE">GPL v3</a>
             </p>
         </footer>
@@ -310,25 +174,28 @@
     <div class="modal-overlay" id="webSerialModal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Can't Connect to Flipper</h2>
+                <h2>Can't connect to Flipper</h2>
             </div>
             <div class="modal-body">
-                <p>WebSerial connection is not available because:</p>
+                <p>WebSerial is not available because:</p>
                 <ul>
-                    <li>You're using a mobile device, or</li>
-                    <li>Your browser doesn't support WebSerial</li>
+                    <li>you're on a mobile device, or</li>
+                    <li>this browser doesn't support WebSerial.</li>
                 </ul>
-                <p>To connect to your Flipper, please use Chrome on a desktop computer.</p>
+                <p>To send files to your Flipper, use Chrome or Edge on a desktop computer.</p>
             </div>
             <div class="modal-footer">
-                <button class="modal-close">Got it!</button>
+                <button class="modal-close btn btn-small">Got it</button>
             </div>
         </div>
     </div>
 
-    <!-- Scripts — order matters (no modules, file:// compatible) -->
-    <script src="js/nfc-generator.js"></script>
+    <!-- Scripts — order matters (classic scripts, file:// compatible) -->
+    <script src="js/vcard-standard.js"></script>
     <script src="js/vcard-parser.js"></script>
+    <script src="js/vcard-serializer.js"></script>
+    <script src="js/vcard-validator.js"></script>
+    <script src="js/nfc-generator.js"></script>
     <script src="js/background.js"></script>
     <script src="js/serial.js"></script>
     <script src="js/app.js"></script>
