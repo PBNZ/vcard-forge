@@ -1,7 +1,7 @@
-# Flipper NFC Maker Plus — CI/CD Pipeline
+# VCF Pro — CI/CD Pipeline
 #
-# Runs on push to main: validates JS syntax and HTML structure.
-# Includes commented-out examples for GitHub Pages and S3 deployment.
+# Runs on push/PR: full test suite + JS syntax + HTML structure validation,
+# then GitHub Pages deployment on main.
 
 name: CI
 
@@ -10,10 +10,14 @@ on:
     branches: [main]
     paths:
       - 'src/**'
+      - 'tests/**'
+      - '.github/workflows/deploy.yml'
   pull_request:
     branches: [main]
     paths:
       - 'src/**'
+      - 'tests/**'
+      - '.github/workflows/deploy.yml'
 
 jobs:
   validate:
@@ -25,6 +29,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Run test suite
+        run: node tests/run-tests.js
 
       - name: Validate JavaScript syntax
         run: |
