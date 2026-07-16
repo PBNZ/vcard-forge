@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **VCF Pro** — the app is now a professional vCard editor with Flipper export
+- **vCard Forge** — the app is now a professional vCard editor with Flipper export
   ([ADR 0001](docs/adr/0001-vcf-pro-transformation.md)): a two-pane workspace
   with a grouped property editor (identity, organization, phones, email/IM/web,
   addresses, dates & personal, notes & metadata, imported passthrough) and a
@@ -43,6 +43,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - CI workflow: full test suite + JS/HTML validation + GitHub Pages deployment
 
 ### Changed
+- Renamed the project to **vCard Forge**; the repository moved to
+  `github.com/PBNZ/vcard-forge` and the live site to `pbnz.github.io/vcard-forge/`
+  ([ADR 0003](docs/adr/0003-rename-to-vcard-forge.md))
 - Layout rebuilt as a responsive two-pane grid (editor left, sticky live
   output right; stacks below 980px) to use screen real estate efficiently
 - **Visual refresh**: navy + teal colour scheme, system font stack, no

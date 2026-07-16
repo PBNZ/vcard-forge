@@ -1,6 +1,6 @@
 /**
  * @file app.js
- * @description UI orchestration for VCF Pro: renders the property editor from
+ * @description UI orchestration for vCard Forge: renders the property editor from
  *              the standards registry, keeps the card model in sync with the
  *              inputs, live-serializes and validates on every change, and
  *              drives .vcf / .nfc export and Flipper WebSerial transfer.

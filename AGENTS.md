@@ -1,4 +1,4 @@
-# AGENTS.md — VCF Pro (Flipper-NFC-Maker-Plus)
+# AGENTS.md — vCard Forge
 
 Canonical instructions for AI agents and contributors. `CLAUDE.md` imports this file.
 

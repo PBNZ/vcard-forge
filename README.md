@@ -1,4 +1,4 @@
-# VCF Pro — vCard Studio for Flipper
+# vCard Forge — the professional vCard editor
 
 > A professional, fully client-side **vCard (.vcf) editor and creator** with RFC-compliant
 > output for vCard **2.1, 3.0, and 4.0** — plus Flipper Zero **`.nfc` contact tag** export
@@ -8,7 +8,7 @@
 > transformed from a general NFC tag generator into a vCard-first tool
 > ([ADR 0001](docs/adr/0001-vcf-pro-transformation.md)).
 
-🌐 **Try it live:** [https://pbnz.github.io/Flipper-NFC-Maker-Plus/](https://pbnz.github.io/Flipper-NFC-Maker-Plus/)
+🌐 **Try it live:** [https://pbnz.github.io/vcard-forge/](https://pbnz.github.io/vcard-forge/)
 
 **License:** [GNU General Public License v3](LICENSE)
 
@@ -31,7 +31,7 @@
 
 1. **Clone** (or download the ZIP):
    ```bash
-   git clone https://github.com/PBNZ/Flipper-NFC-Maker-Plus.git
+   git clone https://github.com/PBNZ/vcard-forge.git
    ```
 2. **Open** `src/index.html` in any modern browser
 3. Build your contact, watch the live source and validation, and export `.vcf` or `.nfc`

@@ -1,4 +1,4 @@
-# VCF Pro — CI/CD Pipeline
+# vCard Forge — CI/CD Pipeline
 #
 # Runs on push/PR: full test suite + JS syntax + HTML structure validation,
 # then GitHub Pages deployment on main.

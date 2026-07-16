@@ -1,4 +1,4 @@
-# Contributing to VCF Pro
+# Contributing to vCard Forge
 
 Thanks for your interest! Start with [AGENTS.md](AGENTS.md) — it is the canonical rulebook
 (layout map, hard rules, architecture). This file covers the practical workflow.
